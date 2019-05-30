@@ -1,0 +1,16 @@
+[package]
+authors = ["Bunogi <2bunogi@gmail.com>"]
+edition = "2018"
+name = "tg"
+version = "0.1.0"
+
+[dependencies]
+futures01 = { package = "futures", version = "0.1"}
+futures-preview = { version = "0.3.0-alpha.16", features = ["compat"] }
+reqwest = "0.9.17"
+runtime = "0.3.0-alpha.4"
+runtime-tokio = "0.3.0-alpha.4"
+serde_json = "1.0.39"
+serde = { version = "1.0.91", features = ["derive"] }
+log = "0.4.6"
+simplelog = "0.5.3"
