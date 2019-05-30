@@ -40,7 +40,7 @@ impl UpdateStream {
         token: &str,
         offset: u64,
     ) -> Pin<Box<Future<Output = Result<ApiResponse, ()>> + Send>> {
-        let json = serde_json::json!({"offset": offset, "timeout": 100});
+        let json = serde_json::json!({"offset": offset, "timeout": 6000});
         client
             .get(Url::parse(&format!("https://api.telegram.org/bot{}/getUpdates", token)).unwrap())
             .json(&json)

@@ -4,12 +4,12 @@ mod updatestream;
 pub use message::*;
 pub use updatestream::UpdateStream;
 
-use serde::{Deserialize, Serialize};
+use crate::chat::ApiChat;
+use crate::user::User;
+use serde::Deserialize;
 use std::collections::VecDeque;
 
-use crate::user::User;
-
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 struct ApiUpdate {
     update_id: u64,
     message: Option<ApiMessage>,
@@ -23,22 +23,29 @@ struct ApiUpdate {
     // pre_checkout_query: PreCheckOutQuery,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 pub struct ApiMessage {
     message_id: u64,
     from: Option<User>,
     date: u64,
     text: Option<String>,
     forward_from: Option<User>,
+    chat: ApiChat,
 }
 
 impl ApiMessage {
     fn into_message(self) -> Message {
         let from = self.from.as_ref().unwrap().clone();
         let date = self.date;
+        let chat = ApiChat::as_chat(&self.chat);
         let data = MessageData::new(self);
 
-        Message { from, date, data }
+        Message {
+            from,
+            date,
+            data,
+            chat,
+        }
     }
 }
 
@@ -66,7 +73,7 @@ impl ApiUpdate {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 struct ApiResponse {
     ok: bool,
     #[serde(rename = "result")]

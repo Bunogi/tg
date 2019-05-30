@@ -1,3 +1,4 @@
+use crate::chat::Chat;
 use crate::update::ApiMessage;
 use crate::user::User;
 
@@ -6,6 +7,7 @@ pub struct Message {
     pub from: User,
     pub date: u64,
     pub data: MessageData,
+    pub chat: Chat,
 }
 
 #[derive(Debug)]
