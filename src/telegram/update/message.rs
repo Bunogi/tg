@@ -1,6 +1,4 @@
-use crate::chat::Chat;
-use crate::update::ApiMessage;
-use crate::user::User;
+use crate::telegram::{chat::Chat, update::ApiMessage, user::User};
 
 #[derive(Debug)]
 pub struct Message {

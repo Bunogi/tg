@@ -12,22 +12,21 @@ use reqwest::{r#async::Client, Url};
 use std::collections::VecDeque;
 use std::pin::Pin;
 
-pub struct UpdateStream {
-    token: String,
-    client: Client,
+pub struct UpdateStream<'a> {
+    update_url: Url,
+    client: &'a Client,
     poll_future: Pin<Box<Future<Output = Result<ApiResponse, ()>> + Send>>,
     poll_running: bool,
     cached_updates: VecDeque<ApiUpdate>,
     offset: u64,
 }
 
-impl UpdateStream {
-    pub fn new(token: String) -> Self {
-        let client = Client::new();
-        let poll_future = Self::get_poll_future(&client, &token, 0);
+impl<'a> UpdateStream<'a> {
+    pub fn new(client: &'a Client, update_url: Url) -> Self {
+        let poll_future = Self::get_poll_future(&client, &update_url, 0);
         Self {
             offset: 0,
-            token,
+            update_url,
             client,
             poll_future,
             poll_running: false,
@@ -37,12 +36,12 @@ impl UpdateStream {
 
     fn get_poll_future(
         client: &Client,
-        token: &str,
+        url: &Url,
         offset: u64,
     ) -> Pin<Box<Future<Output = Result<ApiResponse, ()>> + Send>> {
         let json = serde_json::json!({"offset": offset, "timeout": 6000});
         client
-            .get(Url::parse(&format!("https://api.telegram.org/bot{}/getUpdates", token)).unwrap())
+            .get(url.clone())
             .json(&json)
             .send()
             .and_then(|response| response.into_body().concat2())
@@ -53,7 +52,7 @@ impl UpdateStream {
     }
 }
 
-impl Stream for UpdateStream {
+impl Stream for UpdateStream<'_> {
     type Item = Update;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
@@ -63,7 +62,8 @@ impl Stream for UpdateStream {
         }
 
         if !self.poll_running {
-            self.poll_future = Self::get_poll_future(&self.client, &self.token, self.offset + 1);
+            self.poll_future =
+                Self::get_poll_future(&self.client, &self.update_url, self.offset + 1);
             self.poll_running = true;
         }
 

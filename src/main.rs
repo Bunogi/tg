@@ -3,16 +3,19 @@
 #[macro_use]
 extern crate log;
 
-use crate::update::{MessageData, Update, UpdateStream};
 use futures::stream::StreamExt;
 use log::LevelFilter;
 use simplelog::{Config, TermLogger};
-use crate::chat::ChatType;
-mod update;
-mod user;
-mod chat;
 
-async fn handle_update_async(update: Update) {
+use telegram::{
+    chat::ChatType,
+    update::{MessageData, Update},
+    Telegram,
+};
+
+mod telegram;
+
+async fn handle_update(update: Update) {
     use Update::*;
     match update {
         Message(msg) => {
@@ -41,10 +44,11 @@ async fn handle_update_async(update: Update) {
 #[runtime::main(runtime_tokio::Tokio)]
 async fn main() {
     TermLogger::init(LevelFilter::Info, Config::default()).unwrap();
-    let updates = UpdateStream::new(std::env::var("TELEGRAM_BOT_TOKEN").unwrap());
+    let client = Telegram::new(std::env::var("TELEGRAM_BOT_TOKEN").unwrap());
+    let updates = client.updates();
 
     info!("Running bot...");
     updates
-        .for_each(|f| runtime::spawn(handle_update_async(f)))
+        .for_each(|f| runtime::spawn(handle_update(f)))
         .await;
 }

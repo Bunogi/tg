@@ -4,8 +4,8 @@ mod updatestream;
 pub use message::*;
 pub use updatestream::UpdateStream;
 
-use crate::chat::ApiChat;
-use crate::user::User;
+use super::chat::ApiChat;
+use super::user::User;
 use serde::Deserialize;
 use std::collections::VecDeque;
 
