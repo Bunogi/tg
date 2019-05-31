@@ -1,6 +1,4 @@
-use super::ApiResponse;
-use super::ApiUpdate;
-use super::Update;
+use super::{super::ApiUpdate, Update};
 use futures::{
     compat::Future01CompatExt,
     future::Future,
@@ -9,8 +7,16 @@ use futures::{
 };
 use futures01::{Future as Future01, Stream as Stream01};
 use reqwest::{r#async::Client, Url};
+use serde::Deserialize;
 use std::collections::VecDeque;
 use std::pin::Pin;
+
+#[derive(Debug, Deserialize)]
+struct ApiResponse {
+    ok: bool,
+    #[serde(rename = "result")]
+    updates: VecDeque<ApiUpdate>,
+}
 
 pub struct UpdateStream<'a> {
     update_url: Url,
@@ -34,6 +40,7 @@ impl<'a> UpdateStream<'a> {
         }
     }
 
+    //TODO return proper error type
     fn get_poll_future(
         client: &Client,
         url: &Url,
@@ -58,7 +65,7 @@ impl Stream for UpdateStream<'_> {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         if !self.cached_updates.is_empty() {
             let popped = self.cached_updates.pop_front().unwrap();
-            return Poll::Ready(Some(popped.into_update()));
+            return Poll::Ready(Some(popped.into()));
         }
 
         if !self.poll_running {
