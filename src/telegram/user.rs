@@ -14,12 +14,10 @@ impl fmt::Display for User {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(u) = &self.username {
             write!(f, "{}", u)
+        } else if let Some(last) = &self.last_name {
+            write!(f, "{} {}", self.first_name, last)
         } else {
-            if let Some(last) = &self.last_name {
-                write!(f, "{} {}", self.first_name, last)
-            } else {
-                write!(f, "{}", self.first_name)
-            }
+            write!(f, "{}", self.first_name)
         }
     }
 }

@@ -24,7 +24,7 @@ async fn read_until(r: &mut TcpStream, byte: u8) -> io::Result<Vec<u8>> {
 }
 
 impl RedisConnection {
-    pub async fn new() -> io::Result<Self> {
+    pub async fn connect() -> io::Result<Self> {
         let stream = Arc::new(Mutex::new(TcpStream::connect("127.0.0.1:6379").await?));
         Ok(Self { stream })
     }
@@ -49,7 +49,7 @@ impl RedisConnection {
         let message = message.into_bytes();
         stream.write_all(&message).await?;
 
-        let buf = read_until(&mut stream, '\n' as u8).await?;
+        let buf = read_until(&mut stream, b'\n').await?;
         if buf != b"+OK\r\n" {
             panic!(
                 "unexpected redis response {:?}",
@@ -74,17 +74,17 @@ impl RedisConnection {
         stream.read(&mut buf).await?;
         match buf[0] as char {
             '+' => {
-                buf = read_until(&mut stream, '\n' as u8).await?;
+                buf = read_until(&mut stream, b'\n').await?;
             }
             '$' => {
-                buf = read_until(&mut stream, '\n' as u8).await?;
+                buf = read_until(&mut stream, b'\n').await?;
                 let string = String::from_utf8(buf).unwrap();
                 let len = string.trim().parse::<usize>().unwrap();
                 buf = vec![0; len];
                 stream.read_exact(&mut buf).await?;
             }
             '-' => {
-                buf = read_until(&mut stream, '\n' as u8).await?;
+                buf = read_until(&mut stream, b'\n').await?;
                 panic!("Got error message: {}", String::from_utf8_lossy(&buf));
             }
             _ => panic!(
