@@ -1,3 +1,5 @@
-SELECT userid, message, instant
+SELECT userid, COUNT(message) as messages
   FROM MessageLogs
  WHERE chatid = ?
+ GROUP BY userid
+ ORDER BY messages

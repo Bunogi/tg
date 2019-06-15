@@ -78,6 +78,7 @@ impl Telegram {
             .unwrap();
 
         let bot_mention = format!("@{}", bot_user.username.as_ref().unwrap());
+        debug!("This bot is named {}", bot_mention);
 
         Self {
             client,
@@ -100,11 +101,7 @@ impl Telegram {
         Url::parse(&format!("{}/{}", self.base_url, endpoint)).unwrap()
     }
 
-    async fn send_message_data(
-        &self,
-        chat_id: i64,
-        serialized: serde_json::Value,
-    ) -> Result<Message, ()> {
+    async fn send_message_raw(&self, serialized: serde_json::Value) -> Result<Message, ()> {
         let url = self.get_url("sendMessage");
 
         #[derive(Deserialize)]
@@ -131,7 +128,7 @@ impl Telegram {
             "text": text,
             "disable_notification": true,
         });
-        self.send_message_data(chat_id, json).await
+        self.send_message_raw(json).await
     }
 
     //TODO return proper error type
@@ -140,7 +137,7 @@ impl Telegram {
             "chat_id": chat_id,
             "text": text
         });
-        self.send_message_data(chat_id, json).await
+        self.send_message_raw(json).await
     }
 
     pub async fn get_chat_member(&self, chat_id: i64, user_id: i64) -> Result<User, ()> {
@@ -151,9 +148,14 @@ impl Telegram {
         });
 
         #[derive(Deserialize)]
+        struct RespResult {
+            user: User,
+        }
+
+        #[derive(Deserialize)]
         struct Response {
             ok: bool,
-            result: User,
+            result: RespResult,
         };
 
         self.client
@@ -162,7 +164,7 @@ impl Telegram {
             .send()
             .and_then(|response| response.into_body().concat2())
             .map(|f| serde_json::from_slice(&f).unwrap())
-            .map(|u: Response| u.result)
+            .map(|u: Response| u.result.user)
             .map_err(|_| ())
             .compat()
             .await

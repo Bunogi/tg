@@ -21,7 +21,7 @@ struct ApiResponse {
 pub struct UpdateStream<'a> {
     update_url: Url,
     client: &'a Client,
-    poll_future: Pin<Box<Future<Output = Result<ApiResponse, ()>> + Send>>,
+    poll_future: Pin<Box<dyn Future<Output = Result<ApiResponse, ()>> + Send>>,
     poll_running: bool,
     cached_updates: VecDeque<ApiUpdate>,
     offset: u64,
@@ -45,7 +45,7 @@ impl<'a> UpdateStream<'a> {
         client: &Client,
         url: &Url,
         offset: u64,
-    ) -> Pin<Box<Future<Output = Result<ApiResponse, ()>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<ApiResponse, ()>> + Send>> {
         let json = serde_json::json!({"offset": offset, "timeout": 6000});
         client
             .get(url.clone())
