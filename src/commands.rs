@@ -3,6 +3,7 @@ use crate::include_sql;
 use crate::redis::RedisConnection;
 use crate::telegram::{message::Message, Telegram};
 use crate::util::get_user;
+use chrono::{offset::TimeZone, DateTime};
 
 pub async fn handle_command<'a>(
     msg: &'a Message,
@@ -40,7 +41,17 @@ pub async fn handle_command<'a>(
                     .unwrap()
                 };
 
-                let mut reply = String::new();
+                let (total_msgs, since): (isize, isize) = conn
+                    .query_row(
+                        include_sql!("getmessagesdata.sql"),
+                        params![msg.chat.id],
+                        |row| Ok((row.get(0).unwrap(), row.get(1).unwrap())),
+                    )
+                    .unwrap();
+
+                let since = chrono::Local.timestamp(since as i64, 0);
+
+                let mut reply = format!("{} messages since {}\n", total_msgs, since);
                 for m in messages {
                     debug!("message: {}", m.messages);
                     let appendage = format!(
