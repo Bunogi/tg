@@ -58,7 +58,7 @@ impl RedisConnection {
         Ok(Arc::new(Mutex::new(
             TcpStream::connect(address)
                 .await
-                .map_err(|e| Error::ConnectionFailed(e))?,
+                .map_err(Error::ConnectionFailed)?,
         )))
     }
 

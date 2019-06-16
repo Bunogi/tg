@@ -28,9 +28,9 @@ async fn handle_update(
     use Update::*;
     if let Message(ref msg) = update {
         if let MessageData::Text(ref text) = msg.data {
-            let command: Vec<String> = text.split_whitespace().map(|s| s.to_string()).collect();
-            if command[0] == context.bot_mention() {
-                commands::handle_command(&msg, command, context, redis, db).await;
+            //Is command
+            if text.chars().nth(0).unwrap() == '/' {
+                commands::handle_command(&msg, text, context, redis, db).await;
             } else {
                 let unix_time = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
