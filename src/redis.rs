@@ -86,8 +86,10 @@ impl RedisConnection {
             expiry
         );
         let message = message.into_bytes();
+        debug!("Setting key {} to {}", key, json);
         stream.write_all(&message).await?;
 
+        debug!("Reading from stream");
         let buf = read_until(&mut stream, b'\n').await?;
         if buf != b"+OK\r\n" {
             panic!(
