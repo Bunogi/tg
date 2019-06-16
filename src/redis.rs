@@ -1,5 +1,6 @@
 use futures::{lock::Mutex, prelude::*};
 
+use quick_error::quick_error;
 use runtime::net::TcpStream;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -9,8 +10,27 @@ use std::time;
 
 #[derive(Clone)]
 pub struct RedisConnection {
+    address: String,
     stream: Arc<Mutex<TcpStream>>,
 }
+
+quick_error! {
+    #[derive(Debug)]
+    pub enum Error {
+        Io(err: io::Error) {
+            from()
+        }
+        ConnectionFailed(err: io::Error) {}
+        UnexpectedResponse(got: String, expected: String) {
+            display("Unexpected Redis response \"{}\", expected {}", got, expected)
+        }
+        RedisError(err: String) {
+            display("Redis replied with error: {}", err)
+        }
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 async fn read_until(r: &mut TcpStream, byte: u8) -> io::Result<Vec<u8>> {
     let mut buffer = Vec::new();
@@ -25,13 +45,24 @@ async fn read_until(r: &mut TcpStream, byte: u8) -> io::Result<Vec<u8>> {
 }
 
 impl RedisConnection {
-    pub async fn connect() -> io::Result<Self> {
-        let stream = Arc::new(Mutex::new(TcpStream::connect("127.0.0.1:6379").await?));
-        Ok(Self { stream })
+    pub async fn connect() -> Result<Self> {
+        let address = "127.0.0.1:6379";
+        let stream = Self::reconnect(&address).await?;
+        Ok(Self {
+            address: address.into(),
+            stream,
+        })
     }
 
-    //TODO: burn the following functions and return errors properly
-    pub async fn set<'a, S>(&'a mut self, key: &'a str, value: S) -> io::Result<()>
+    async fn reconnect(address: &str) -> Result<Arc<Mutex<TcpStream>>> {
+        Ok(Arc::new(Mutex::new(
+            TcpStream::connect(address)
+                .await
+                .map_err(|e| Error::ConnectionFailed(e))?,
+        )))
+    }
+
+    pub async fn set<'a, S>(&'a mut self, key: &'a str, value: S) -> Result<()>
     where
         S: Serialize,
     {
@@ -52,10 +83,10 @@ impl RedisConnection {
 
         let buf = read_until(&mut stream, b'\n').await?;
         if buf != b"+OK\r\n" {
-            panic!(
-                "unexpected redis response {:?}",
-                String::from_utf8_lossy(&buf)
-            )
+            Err(Error::UnexpectedResponse(
+                "+OK\r\n".into(),
+                format!("{}", String::from_utf8_lossy(&buf)),
+            ))
         } else {
             Ok(())
         }
@@ -66,7 +97,7 @@ impl RedisConnection {
         key: &'a str,
         value: S,
         expiry: time::Duration,
-    ) -> io::Result<()>
+    ) -> Result<()>
     where
         S: Serialize,
     {
@@ -92,16 +123,16 @@ impl RedisConnection {
         debug!("Reading from stream");
         let buf = read_until(&mut stream, b'\n').await?;
         if buf != b"+OK\r\n" {
-            panic!(
-                "unexpected redis response {:?}",
-                String::from_utf8_lossy(&buf)
-            )
+            Err(Error::UnexpectedResponse(
+                "+OK\r\n".into(),
+                format!("{}", String::from_utf8_lossy(&buf)),
+            ))
         } else {
             Ok(())
         }
     }
 
-    pub async fn get<'a, D>(&'a mut self, key: &'a str) -> Result<Option<D>, io::Error>
+    pub async fn get<'a, D>(&'a mut self, key: &'a str) -> Result<Option<D>>
     where
         D: DeserializeOwned,
     {
@@ -131,12 +162,14 @@ impl RedisConnection {
             }
             '-' => {
                 buf = read_until(&mut stream, b'\n').await?;
-                panic!("Got error message: {}", String::from_utf8_lossy(&buf));
+                return Err(Error::RedisError(String::from_utf8_lossy(&buf).into()));
             }
-            _ => panic!(
-                "Unexpected redis response: {:?}",
-                String::from_utf8_lossy(&buf)
-            ),
+            _ => {
+                return Err(Error::UnexpectedResponse(
+                    String::from_utf8_lossy(&buf).into(),
+                    "Non-error reply".into(),
+                ))
+            }
         }
 
         let deserialized = serde_json::from_slice(&buf).unwrap();
