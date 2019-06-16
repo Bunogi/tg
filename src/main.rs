@@ -73,7 +73,10 @@ async fn main() -> std::io::Result<()> {
     info!("Connecting to redis...");
     let redis_conn = match redis::RedisConnection::connect().await {
         Ok(c) => c,
-        Err(e) => { error!("Failed to connect to redis: {}", e); exit(1); },
+        Err(e) => {
+            error!("Failed to connect to redis: {}", e);
+            exit(1);
+        }
     };
     info!("Opening database...");
     let db_conn = AsyncSqlConnection::new(Connection::open("logs.db").unwrap());

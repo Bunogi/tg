@@ -37,6 +37,7 @@ pub async fn handle_command(
 
             let mut reply = String::new();
             for m in messages {
+                debug!("message: {}", m.messages);
                 let appendage = format!(
                     "{}: {} messages\n",
                     get_user(msg.chat.id, m.userid as i64, context.clone(), redis.clone())

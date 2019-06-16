@@ -12,6 +12,7 @@ pub async fn get_user(
     match redis.get(&user_path).await.unwrap() {
         Some(u) => u,
         None => {
+            debug!("Getting user from tg");
             let user = context.get_chat_member(chat_id, user_id).await.unwrap();
             redis
                 .set_with_expiry(
