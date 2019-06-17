@@ -63,7 +63,7 @@ async fn handle_update(
                 include_sql!("logedit.sql"), params![msg.chat.id as isize, msg.from.id as isize, msg.id as isize],
             ).unwrap();
             info!(
-                "[{}] user <{}> edited message {}",
+                "[{}] user {} edited message {}",
                 msg.chat.kind,
                 msg.from,
                 msg.id,
