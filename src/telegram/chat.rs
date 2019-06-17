@@ -1,4 +1,5 @@
 use std::convert::From;
+use std::fmt;
 
 #[derive(Debug)]
 pub struct Chat {
@@ -36,4 +37,16 @@ pub enum ChatType {
     Group { title: String },
     SuperGroup { title: String },
     Channel { title: String },
+}
+
+impl fmt::Display for ChatType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ChatType::Private => write!(f, "<direct>")?,
+            ChatType::Group { ref title } => write!(f, "in group {}", title)?,
+            ChatType::SuperGroup { ref title } => write!(f, "in supergroup {}", title)?,
+            ChatType::Channel { ref title } => write!(f, "in channel {}", title)?,
+        }
+        Ok(())
+    }
 }

@@ -7,6 +7,7 @@ pub struct AsyncSqlConnection {
     inner: Arc<Mutex<Connection>>,
 }
 
+//TODO connection pooling
 impl AsyncSqlConnection {
     pub fn new(conn: Connection) -> Self {
         Self {

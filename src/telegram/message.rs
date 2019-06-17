@@ -3,6 +3,7 @@ use std::convert::From;
 
 #[derive(Debug)]
 pub struct Message {
+    pub id: u64,
     pub from: User,
     pub date: u64,
     pub data: MessageData,
@@ -24,6 +25,7 @@ impl From<ApiMessage> for Message {
         };
 
         Self {
+            id: message.id,
             from: message.from.unwrap(),
             date,
             data,

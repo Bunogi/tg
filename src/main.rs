@@ -11,7 +11,6 @@ use db::AsyncSqlConnection;
 use futures::stream::StreamExt;
 use rusqlite::Connection;
 use std::process::exit;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 mod commands;
 mod db;
@@ -26,16 +25,14 @@ async fn handle_update(
     db: AsyncSqlConnection,
 ) {
     use Update::*;
-    if let Message(ref msg) = update {
+    match update {
+        Message(ref msg) => {
         if let MessageData::Text(ref text) = msg.data {
             //Is command
             if text.chars().nth(0).unwrap() == '/' {
                 commands::handle_command(&msg, text, context, redis, db).await;
             } else {
-                let unix_time = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                let unix_time = util::get_unix_timestamp();
                 let lock = db.get().await;
                 lock.execute(
                     include_sql!("logmessage.sql"),
@@ -50,12 +47,7 @@ async fn handle_update(
             }
             info!(
                 "[{}] <{}>: {}",
-                match msg.chat.kind {
-                    ChatType::Private => "<direct>".to_string(),
-                    ChatType::Group { ref title } => format!("in group {}", title),
-                    ChatType::SuperGroup { ref title } => format!("in supergroup {}", title),
-                    ChatType::Channel { ref title } => format!("in channel {}", title),
-                },
+                msg.chat.kind,
                 msg.from,
                 match &msg.data {
                     MessageData::Text(s) => s.to_string(),
@@ -64,6 +56,20 @@ async fn handle_update(
                 }
             );
         }
+        },
+        MessageEdited(msg) => {
+            let lock = db.get().await;
+            lock.execute(
+                include_sql!("logedit.sql"), params![msg.chat.id as isize, msg.from.id as isize, msg.id as isize],
+            ).unwrap();
+            info!(
+                "[{}] user <{}> edited message {}",
+                msg.chat.kind,
+                msg.from,
+                msg.id,
+            )
+        }
+        _ => warn!("Update event {:?} not handled!", update)
     }
 }
 

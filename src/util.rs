@@ -1,5 +1,6 @@
 use crate::redis::RedisConnection;
 use crate::telegram::{user::User, Telegram};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 //Will get the user from cache if it is cached, otherwise request the data
 pub async fn get_user(
@@ -25,4 +26,11 @@ pub async fn get_user(
             user
         }
     }
+}
+
+pub fn get_unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }

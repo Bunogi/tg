@@ -4,3 +4,9 @@ CREATE TABLE IF NOT EXISTS MessageLogs (
   message TEXT NOT NULL,
   instant INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS EditLogs (
+  chatid INTEGER NOT NULL,
+  userid INTEGER NOT NULL,
+  msgid INTEGER NOT NULL
+);

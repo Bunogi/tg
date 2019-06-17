@@ -36,7 +36,8 @@ struct ApiUpdate {
 
 #[derive(Debug, Deserialize)]
 struct ApiMessage {
-    message_id: u64,
+    #[serde(rename = "message_id")]
+    id: u64,
     from: Option<User>,
     date: u64,
     text: Option<String>,
