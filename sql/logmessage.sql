@@ -1,2 +1,2 @@
-INSERT INTO Messagelogs(chatid, userid, message, instant)
-VALUES(?, ?, ?, ?)
+INSERT INTO Messagelogs(msgid, chatid, userid, message, instant)
+VALUES(?,?,?,?,?)

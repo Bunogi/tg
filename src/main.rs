@@ -6,7 +6,7 @@ extern crate log;
 extern crate rusqlite;
 
 use crate::redis::RedisConnection;
-use crate::telegram::{chat::ChatType, message::MessageData, update::Update, Telegram};
+use crate::telegram::{message::MessageData, update::Update, Telegram};
 use db::AsyncSqlConnection;
 use futures::stream::StreamExt;
 use rusqlite::Connection;
@@ -27,49 +27,50 @@ async fn handle_update(
     use Update::*;
     match update {
         Message(ref msg) => {
-        if let MessageData::Text(ref text) = msg.data {
-            //Is command
-            if text.chars().nth(0).unwrap() == '/' {
-                commands::handle_command(&msg, text, context, redis, db).await;
-            } else {
-                let unix_time = util::get_unix_timestamp();
-                let lock = db.get().await;
-                lock.execute(
-                    include_sql!("logmessage.sql"),
-                    params![
-                        msg.chat.id as isize,
-                        msg.from.id as isize,
-                        text,
-                        unix_time as isize
-                    ],
-                )
-                .unwrap();
-            }
-            info!(
-                "[{}] <{}>: {}",
-                msg.chat.kind,
-                msg.from,
-                match &msg.data {
-                    MessageData::Text(s) => s.to_string(),
-                    MessageData::Forward(u, s) => format!("[Forwarded From {}]: {}", u, s),
-                    MessageData::Other => "[Unsupported]".to_string(),
+            if let MessageData::Text(ref text) = msg.data {
+                //Is command
+                if text.chars().nth(0).unwrap() == '/' {
+                    commands::handle_command(&msg, text, context, redis, db).await;
+                } else {
+                    let unix_time = util::get_unix_timestamp();
+                    let lock = db.get().await;
+                    lock.execute(
+                        include_sql!("logmessage.sql"),
+                        params![
+                            msg.id as isize,
+                            msg.chat.id as isize,
+                            msg.from.id as isize,
+                            text,
+                            unix_time as isize
+                        ],
+                    )
+                    .unwrap();
                 }
-            );
+                info!(
+                    "[{}] <{}>: {}",
+                    msg.chat.kind,
+                    msg.from,
+                    match &msg.data {
+                        MessageData::Text(s) => s.to_string(),
+                        MessageData::Forward(u, s) => format!("[Forwarded From {}]: {}", u, s),
+                        MessageData::Other => "[Unsupported]".to_string(),
+                    }
+                );
+            }
         }
-        },
         MessageEdited(msg) => {
             let lock = db.get().await;
             lock.execute(
-                include_sql!("logedit.sql"), params![msg.chat.id as isize, msg.from.id as isize, msg.id as isize],
-            ).unwrap();
+                include_sql!("logedit.sql"),
+                params![msg.chat.id as isize, msg.from.id as isize, msg.id as isize],
+            )
+            .unwrap();
             info!(
                 "[{}] user {} edited message {}",
-                msg.chat.kind,
-                msg.from,
-                msg.id,
+                msg.chat.kind, msg.from, msg.id,
             )
         }
-        _ => warn!("Update event {:?} not handled!", update)
+        _ => warn!("Update event {:?} not handled!", update),
     }
 }
 
