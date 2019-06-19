@@ -76,9 +76,9 @@ async fn handle_message(
                     sticker.emoji,
                     sticker.set_name,
                     unix_time as isize,
-                ]
+                ],
             )
-                .unwrap();
+            .unwrap();
         }
         _ => (),
     }

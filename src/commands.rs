@@ -20,23 +20,33 @@ pub async fn handle_command<'a>(
             //support would be hard anyway.
 
             let conn = db.get().await;
-            let messages = conn
+            let messages = match conn
                 .prepare_cached(include_sql!("getmessages.sql"))
                 .unwrap()
                 .query_map(params![msg.chat.id], |row| Ok((row.get(0)?, row.get(1)?)))
                 .unwrap()
                 .collect::<Result<Vec<(isize, isize)>, rusqlite::Error>>()
-                .unwrap();
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    error!("Couldn't get messages in leaderboard command: {:?}", e);
+                    return;
+                }
+            };
 
-            let (total_msgs, since): (isize, isize) = conn
-                .query_row(
-                    include_sql!("getmessagesdata.sql"),
-                    params![msg.chat.id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap();
+            let (total_msgs, since): (isize, isize) = match conn.query_row(
+                include_sql!("getmessagesdata.sql"),
+                params![msg.chat.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ) {
+                Ok((m, s)) => (m, s),
+                Err(e) => {
+                    error!("Couldn't get message data in leaderboard command: {:?}", e);
+                    return;
+                }
+            };
 
-            let edits = conn
+            let edits = match conn
                 .prepare_cached(include_sql!("geteditpercentage.sql"))
                 .unwrap()
                 .query_map(params![msg.chat.id], |row| {
@@ -47,7 +57,16 @@ pub async fn handle_command<'a>(
                 })
                 .unwrap()
                 .collect::<Result<Vec<(isize, f64, isize)>, rusqlite::Error>>()
-                .unwrap();
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    error!(
+                        "Couldn't get edit percentage in leaderboard command: {:?}",
+                        e
+                    );
+                    return;
+                }
+            };
 
             let since = chrono::Local.timestamp(since as i64, 0);
 
