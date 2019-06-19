@@ -11,3 +11,13 @@ CREATE TABLE IF NOT EXISTS EditLogs (
   userid INTEGER NOT NULL,
   msgid INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS StickerLogs (
+  userid INTEGER NOT NULL,
+  chatid INTEGER NOT NULL,
+  msgid INTEGER NOT NULL,
+  fileid TEXT NOT NULL,
+  packname TEXT,
+  emoji TEXT,
+  instant INTEGER NOT NULL
+);

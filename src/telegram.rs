@@ -8,6 +8,7 @@ use futures01::{future::Future as Future01, stream::Stream};
 use message::Message;
 use reqwest::{r#async::Client, Url};
 use serde::Deserialize;
+use std::fmt;
 use update::UpdateStream;
 use user::User;
 
@@ -35,6 +36,30 @@ struct ApiUpdate {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct Sticker {
+    pub file_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub emoji: Option<String>,
+    pub set_name: Option<String>,
+    pub file_size: Option<usize>,
+}
+
+impl fmt::Display for Sticker {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(ref emoji) = self.emoji {
+            write!(f, "{} ", emoji)?;
+        }
+
+        write!(f, "Sticker")?;
+        if let Some(ref set) = self.set_name {
+            write!(f, " from pack {}", set)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
 struct ApiMessage {
     #[serde(rename = "message_id")]
     id: u64,
@@ -42,6 +67,7 @@ struct ApiMessage {
     date: u64,
     text: Option<String>,
     forward_from: Option<User>,
+    sticker: Option<Sticker>,
     chat: ApiChat,
 }
 

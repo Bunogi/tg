@@ -1,4 +1,4 @@
-use super::{chat::Chat, user::User, ApiMessage};
+use super::{chat::Chat, user::User, ApiMessage, Sticker};
 use std::convert::From;
 
 #[derive(Debug)]
@@ -20,6 +20,8 @@ impl From<ApiMessage> for Message {
             } else {
                 MessageData::Text(text)
             }
+        } else if let Some(sticker) = message.sticker {
+            MessageData::Sticker(sticker)
         } else {
             MessageData::Other
         };
@@ -38,6 +40,7 @@ impl From<ApiMessage> for Message {
 pub enum MessageData {
     Text(String),
     Forward(User, String),
+    Sticker(Sticker),
     //Unsupported
     Other,
 }

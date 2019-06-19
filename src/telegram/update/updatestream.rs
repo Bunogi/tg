@@ -89,7 +89,10 @@ impl Stream for UpdateStream<'_> {
                 Poll::Pending
             }
             Poll::Ready(Err(e)) => {
-                warn!("Got an error: {:?}. Shuttng down update stream", e);
+                warn!(
+                    "Updatestream got an error: {:?}. Shutting down update stream",
+                    e
+                );
                 Poll::Ready(None)
             }
             Poll::Pending => Poll::Pending,
