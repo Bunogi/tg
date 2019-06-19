@@ -1,7 +1,7 @@
 use crate::db::AsyncSqlConnection;
 use crate::include_sql;
 use crate::redis::RedisConnection;
-use crate::telegram::{message::Message, Telegram};
+use crate::telegram::{message::Message, Telegram, chat::ChatType};
 use crate::util::get_user;
 use chrono::offset::TimeZone;
 
@@ -121,10 +121,16 @@ pub async fn handle_command<'a>(
                 .unwrap();
         }
         _ => {
-            context
-                .send_message_silent(msg.chat.id, "No such command".to_string())
-                .await
-                .unwrap();
+            match msg.chat.kind {
+                //Only nag at the user for wrong command if in a private chat
+                ChatType::Private => {
+                    context
+                        .send_message_silent(msg.chat.id, "No such command".to_string())
+                        .await
+                        .unwrap();
+                },
+                _ => ()
+            }
         }
     };
 }
