@@ -1,9 +1,22 @@
 use crate::db::AsyncSqlConnection;
 use crate::include_sql;
 use crate::redis::RedisConnection;
-use crate::telegram::{message::Message, Telegram, chat::ChatType};
+use crate::telegram::{chat::ChatType, message::Message, Telegram};
 use crate::util::get_user;
 use chrono::offset::TimeZone;
+
+//Resolves commands written like /command@foobot which telegram does automatically. Cannot support '@' in command names.
+fn get_command<'a>(input: &'a str, botname: &'a str) -> Option<&'a str> {
+    if let Some(at) = input.find("@") {
+        if &input[at..] == botname {
+            Some(&input[..at])
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
 
 pub async fn handle_command<'a>(
     msg: &'a Message,
@@ -13,7 +26,16 @@ pub async fn handle_command<'a>(
     db: AsyncSqlConnection,
 ) {
     let split: Vec<String> = msg_text.split_whitespace().map(|s| s.into()).collect();
-    match split[0].as_str() {
+    let root = if let ChatType::Private = msg.chat.kind {
+        split[0].as_str()
+    } else {
+        let command = get_command(&split[0], context.bot_mention());
+        if command.is_none() {
+            return;
+        }
+        command.unwrap()
+    };
+    match root {
         "/leaderboards" => {
             //Apparently the preferred way to do blocking calls in async code is to put it in an async
             //block and then await it, so do that. SQLite doesn't have async primitives so good async
@@ -128,8 +150,8 @@ pub async fn handle_command<'a>(
                         .send_message_silent(msg.chat.id, "No such command".to_string())
                         .await
                         .unwrap();
-                },
-                _ => ()
+                }
+                _ => (),
             }
         }
     };
