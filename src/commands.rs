@@ -103,7 +103,7 @@ pub async fn leaderboards<'a>(
     let mut edits = edits.into_iter();
     if let Some((user, percentage, count)) = edits.next() {
         let appendage = format!(
-            "{} is the biggest disaster, having edited {}% of their messages({} edits total)!\n",
+            "{} is the biggest disaster, having edited {:.2}% of their messages({} edits total)!\n",
             get_user(chatid, user as i64, context.clone(), redis.clone()).await,
             percentage,
             count
@@ -112,7 +112,7 @@ pub async fn leaderboards<'a>(
     }
     for (user, percentage, count) in edits {
         let appendage = format!(
-            "{}: {}% ({})\n",
+            "{}: {:.2}% ({})\n",
             get_user(chatid, user as i64, context.clone(), redis.clone()).await,
             percentage,
             count
