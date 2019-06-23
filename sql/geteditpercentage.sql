@@ -11,3 +11,4 @@ SELECT MessageLogs.userid,
          ) AS edits ON MessageLogs.userid = edits.userid
  WHERE MessageLogs.chatid = ?1
  GROUP BY MessageLogs.userid
+ ORDER BY percentage DESC
