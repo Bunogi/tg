@@ -1,4 +1,7 @@
-use futures::{lock::{Mutex, MutexGuard}, prelude::*};
+use futures::{
+    lock::{Mutex, MutexGuard},
+    prelude::*,
+};
 
 use quick_error::quick_error;
 use runtime::net::TcpStream;
@@ -9,7 +12,7 @@ use std::time;
 
 #[derive(Clone)]
 pub struct RedisPool {
-    connections: Vec<Arc<Mutex<RedisConnection>>>
+    connections: Vec<Arc<Mutex<RedisConnection>>>,
 }
 
 impl RedisPool {
@@ -19,7 +22,7 @@ impl RedisPool {
             let conn = Arc::new(Mutex::new(RedisConnection::connect().await?));
             connections.push(conn);
         }
-        Ok(Self { connections})
+        Ok(Self { connections })
     }
 
     pub async fn get(&self) -> MutexGuard<RedisConnection> {

@@ -25,35 +25,25 @@ pub async fn leaderboards<'a>(
     context: Telegram,
     redis_pool: RedisPool,
     db: SqlPool,
-) {
+) -> Result<(), String> {
     let conn = db.get().await;
-    let messages = match conn
+    let messages = conn
         .prepare_cached(include_sql!("getmessages.sql"))
         .unwrap()
         .query_map(params![chatid], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap()
         .collect::<Result<Vec<(isize, isize)>, rusqlite::Error>>()
-    {
-        Ok(v) => v,
-        Err(e) => {
-            error!("Couldn't get messages in leaderboard command: {:?}", e);
-            return;
-        }
-    };
+        .map_err(|e| format!("getting messages: {:?}", e))?;
 
-    let (total_msgs, since): (isize, isize) = match conn.query_row(
-        include_sql!("getmessagesdata.sql"),
-        params![chatid],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ) {
-        Ok((m, s)) => (m, s),
-        Err(e) => {
-            error!("Couldn't get message data in leaderboard command: {:?}", e);
-            return;
-        }
-    };
+    let (total_msgs, since): (isize, isize) = conn
+        .query_row(
+            include_sql!("getmessagesdata.sql"),
+            params![chatid],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| format!("getting message data: {:?}", e))?;
 
-    let edits = match conn
+    let edits = conn
         .prepare_cached(include_sql!("geteditpercentage.sql"))
         .unwrap()
         .query_map(params![chatid], |row| {
@@ -64,16 +54,7 @@ pub async fn leaderboards<'a>(
         })
         .unwrap()
         .collect::<Result<Vec<(isize, f64, isize)>, rusqlite::Error>>()
-    {
-        Ok(v) => v,
-        Err(e) => {
-            error!(
-                "Couldn't get edit percentage in leaderboard command: {:?}",
-                e
-            );
-            return;
-        }
-    };
+        .map_err(|e| format!("getting edit percentage: {:?}", e))?;
 
     let since = chrono::Local.timestamp(since as i64, 0);
     let redis = redis_pool.get().await;
@@ -123,7 +104,11 @@ pub async fn leaderboards<'a>(
 
         reply += &appendage;
     }
-    context.send_message_silent(chatid, reply).await.unwrap();
+    context
+        .send_message_silent(chatid, reply)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("sending message: {:?}", e))
 }
 
 pub async fn stickerlog(
@@ -131,9 +116,9 @@ pub async fn stickerlog(
     context: Telegram,
     redis_pool: RedisPool,
     db: SqlPool,
-) {
+) -> Result<(), String> {
     let (caption, images, usages) = {
-        //Do in block to limit time conn is locked TODO make conn have connection pooling
+        //Do in block to limit time conn is locked, since the rendering can be pretty time-consuming.
         let conn = db.get().await;
         //Build caption message
         let (total_stickers, packs, since): (isize, isize, isize) = conn
@@ -147,7 +132,8 @@ pub async fn stickerlog(
                     Ok((total_stickers, packs, earliest))
                 },
             )
-            .unwrap();
+            .map_err(|e| format!("getting sticker stats: {:?}", e))?;
+
         let caption = format!(
             "{} sent stickers from {} packs since {}",
             total_stickers,
@@ -162,7 +148,7 @@ pub async fn stickerlog(
             .query_map(rusqlite::NO_PARAMS, |row| Ok((row.get(0)?, row.get(1)?)))
             .unwrap()
             .collect::<Result<Vec<(String, i32)>, rusqlite::Error>>()
-            .unwrap();
+            .map_err(|e| format!("getting sticker counts: {:?}", e))?;
 
         let (file_ids, usages): (Vec<String>, Vec<i32>) = logs.into_iter().unzip();
         //Get sticker images
@@ -174,10 +160,19 @@ pub async fn stickerlog(
                 Ok(Some(v)) => images.push(v),
                 Ok(None) => {
                     debug!("File {} not saved in redis, downloading from Telegram", f);
-                    let file_key = context.download_file(redis.clone(), &f).await.unwrap();
-                    images.push(redis.get_bytes(&file_key).await.unwrap().unwrap());
+                    let file_key = context
+                        .download_file(redis.clone(), &f)
+                        .await
+                        .map_err(|e| format!("downloading file {}: {:?}", f, e))?;
+                    images.push(
+                        redis
+                            .get_bytes(&file_key)
+                            .await
+                            .map_err(|e| format!("getting image from Redis: {}: {:?}", f, e))?
+                            .unwrap(),
+                    );
                 }
-                _ => panic!("couldn't get redis thing"),
+                Err(e) => return Err(format!("communicating with Redis: {:?}", e)),
             }
         }
         (caption, images, usages)
@@ -225,8 +220,7 @@ pub async fn stickerlog(
                 );
 
                 if image.is_null() {
-                    error!("Failed to decode webp image");
-                    return;
+                    return Err("decoding webp image".into());
                 }
 
                 let len = image_width as usize * image_height as usize * 4;
@@ -288,7 +282,8 @@ pub async fn stickerlog(
     context
         .send_photo(msg.chat.id, rendered_image, Some(caption), true)
         .await
-        .unwrap();
+        .map(|_| ())
+        .map_err(|e| format!("sending image: {:?}", e))
 }
 
 pub async fn handle_command<'a>(
@@ -308,19 +303,41 @@ pub async fn handle_command<'a>(
         }
         command.unwrap()
     };
-    match root {
+    let res = match root {
         "/leaderboards" => {
-            leaderboards(msg.chat.id, context.clone(), redis_pool.clone(), db_pool.clone()).await
+            leaderboards(
+                msg.chat.id,
+                context.clone(),
+                redis_pool.clone(),
+                db_pool.clone(),
+            )
+            .await
         }
-        "/stickerlog" => stickerlog(msg, context.clone(), redis_pool.clone(), db_pool.clone()).await,
+        "/stickerlog" => {
+            stickerlog(msg, context.clone(), redis_pool.clone(), db_pool.clone()).await
+        }
         _ => {
             if let ChatType::Private = msg.chat.kind {
                 //Only nag at the user for wrong command if in a private chat
                 context
                     .send_message_silent(msg.chat.id, "No such command".to_string())
                     .await
-                    .unwrap();
+                    .map(|_| ())
+                    .map_err(|e| format!("sending no such command message: {:?}", e))
+            } else {
+                Ok(())
             }
         }
     };
+
+    if let Err(e) = res {
+        error!("Command failed at '{}'", e);
+        context
+            .send_message_silent(
+                msg.chat.id,
+                "Fatal error occurred in command, see bot log".into(),
+            )
+            .await
+            .unwrap();
+    }
 }

@@ -36,12 +36,7 @@ pub async fn handle_update(
     }
 }
 
-async fn handle_message(
-    msg: &Message,
-    context: Telegram,
-    redis_pool: RedisPool,
-    db_pool: SqlPool,
-) {
+async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool, db_pool: SqlPool) {
     match msg.data {
         MessageData::Text(ref text) => {
             //Is command
