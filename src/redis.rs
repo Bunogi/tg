@@ -3,7 +3,6 @@ use futures::{lock::Mutex, prelude::*};
 use quick_error::quick_error;
 use runtime::net::TcpStream;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::io;
 use std::sync::Arc;
 use std::time;
@@ -62,23 +61,30 @@ impl RedisConnection {
         )))
     }
 
-    pub async fn set<'a, S>(&'a mut self, key: &'a str, value: S) -> Result<()>
+    pub async fn set<'a, D>(&'a mut self, key: &'a str, data: D) -> Result<()>
     where
-        S: Serialize,
+        D: AsRef<[u8]>,
     {
         let mut stream = self.stream.lock().await;
 
-        let json = serde_json::to_string(&value).unwrap();
+        let data = data.as_ref();
 
         //SET <key> <value>
-        let message = format!(
-            "*3\r\n$3\r\nSET\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+        let mut message = format!(
+            "*3\r\n$3\r\nSET\r\n${}\r\n{}\r\n${}\r\n",
             key.len(),
             key,
-            json.len(),
-            json
-        );
-        let message = message.into_bytes();
+            data.len(),
+        )
+        .into_bytes();
+
+        for d in data.iter().cloned() {
+            message.push(d);
+        }
+
+        message.push(b'\r');
+        message.push(b'\n');
+
         stream.write_all(&message).await?;
 
         let buf = read_until(&mut stream, b'\n').await?;
@@ -92,35 +98,44 @@ impl RedisConnection {
         }
     }
 
-    pub async fn set_with_expiry<'a, S>(
+    pub async fn set_with_expiry<'a, D>(
         &'a mut self,
         key: &'a str,
-        value: S,
+        data: D,
         expiry: time::Duration,
     ) -> Result<()>
     where
-        S: Serialize,
+        D: AsRef<[u8]>,
     {
         let mut stream = self.stream.lock().await;
 
-        let json = serde_json::to_string(&value).unwrap();
         let expiry = expiry.as_millis().to_string();
+        let data = data.as_ref();
 
         //SET <key> <value> PX n
-        let message = format!(
-            "*5\r\n$3\r\nSET\r\n${}\r\n{}\r\n${}\r\n{}\r\n$2\r\nPX\r\n${}\r\n{}\r\n",
+        let mut message = format!(
+            "*5\r\n$3\r\nSET\r\n${}\r\n{}\r\n${}\r\n",
             key.len(),
             key,
-            json.len(),
-            json,
-            expiry.len(),
-            expiry
-        );
-        let message = message.into_bytes();
-        debug!("Setting key {} to {}", key, json);
+            data.len(),
+        )
+        .into_bytes();
+
+        for d in data.iter().cloned() {
+            message.push(d);
+        }
+
+        let message: Vec<u8> = message
+            .into_iter()
+            .chain(
+                format!("\r\n$2\r\nPX\r\n${}\r\n{}\r\n", expiry.len(), expiry)
+                    .into_bytes()
+                    .into_iter(),
+            )
+            .collect();
+
         stream.write_all(&message).await?;
 
-        debug!("Reading from stream");
         let buf = read_until(&mut stream, b'\n').await?;
         if buf != b"+OK\r\n" {
             Err(Error::UnexpectedResponse(
@@ -136,6 +151,16 @@ impl RedisConnection {
     where
         D: DeserializeOwned,
     {
+        let buf = self.get_bytes(key).await?;
+        if let Some(buf) = buf {
+            let deserialized = serde_json::from_slice(&buf).unwrap();
+            Ok(Some(deserialized))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn get_bytes<'a>(&'a mut self, key: &'a str) -> Result<Option<Vec<u8>>> {
         let mut stream = self.stream.lock().await;
         //GET <key>
         let message = format!("*2\r\n$3\r\nGET\r\n${}\r\n{}\r\n", key.len(), key);
@@ -172,7 +197,6 @@ impl RedisConnection {
             }
         }
 
-        let deserialized = serde_json::from_slice(&buf).unwrap();
-        Ok(Some(deserialized))
+        Ok(Some(buf))
     }
 }

@@ -3,10 +3,15 @@ pub mod message;
 pub mod update;
 pub mod user;
 
+use crate::redis::RedisConnection;
 use futures::compat::*;
+use futures::prelude::*;
 use futures01::{future::Future as Future01, stream::Stream};
 use message::Message;
-use reqwest::{r#async::Client, Url};
+use reqwest::{
+    r#async::{multipart, Client},
+    Url,
+};
 use serde::Deserialize;
 use std::fmt;
 use update::UpdateStream;
@@ -77,6 +82,7 @@ pub struct Telegram {
     base_url: String,
     bot_user: User,
     bot_mention: String,
+    token: String,
 }
 
 impl Telegram {
@@ -112,6 +118,7 @@ impl Telegram {
             base_url,
             bot_user,
             bot_mention,
+            token,
         }
     }
 
@@ -165,6 +172,104 @@ impl Telegram {
             "text": text
         });
         self.send_message_raw(json).await
+    }
+
+    //Returns redis path of the downloaded file
+    pub async fn download_file<'a>(
+        &'a self,
+        mut redis: RedisConnection,
+        file_id: &'a str,
+    ) -> Result<String, ()> {
+        #[derive(Deserialize)]
+        struct File {
+            file_path: String,
+        }
+        #[derive(Deserialize)]
+        struct FileResp {
+            ok: bool,
+            result: File,
+        }
+
+        let get_file = self.get_url("getFile");
+        let json = serde_json::json!({ "file_id": file_id });
+        let file_path = self
+            .client
+            .get(get_file)
+            .json(&json)
+            .send()
+            .and_then(|response| response.into_body().concat2())
+            .map(|f| serde_json::from_slice(&f).unwrap())
+            .map(|m: FileResp| m.result.file_path)
+            .map_err(|e| error!("Failed to get download link for {}: {:?}", file_id, &e))
+            .compat()
+            .await?;
+
+        let file: Vec<u8> = self
+            .client
+            .get(
+                Url::parse(&format!(
+                    "https://api.telegram.org/file/bot{}/{}",
+                    self.token, file_path
+                ))
+                .unwrap(),
+            )
+            .send()
+            .and_then(|response| response.into_body().concat2())
+            .map(|f| f.iter().cloned().collect::<Vec<u8>>())
+            .map_err(|e| error!("Failed to download {}: {:?}", file_id, &e))
+            .compat()
+            .await?;
+
+        let key = format!("tg.download.{}", file_id);
+
+        redis
+            .set(&key, &file)
+            .map_err(|e| error!("Couldn't set key {}: {:?}", key, e))
+            .await?;
+
+        Ok(key)
+    }
+
+    //TODO take slice instead when multiple lifetimes in async fns are a thing
+    pub async fn send_photo<'a>(
+        &'a self,
+        chat_id: i64,
+        data: Vec<u8>,
+        caption: Option<String>,
+        silent: bool,
+    ) -> Result<Message, ()> {
+        // let path = format!("/sendPhoto?chat_id={}", chat_id)
+        let url = self.get_url("sendPhoto");
+        let form = multipart::Form::new()
+            .part("photo", multipart::Part::bytes(data).file_name("image.png"))
+            .part("chat_id", multipart::Part::text(chat_id.to_string()))
+            .part(
+                "disable_notification",
+                multipart::Part::text(silent.to_string()),
+            );
+
+        let form = if let Some(c) = caption {
+            form.part("caption", multipart::Part::text(c))
+        } else {
+            form
+        };
+
+        #[derive(Deserialize)]
+        struct Response {
+            ok: bool,
+            result: ApiMessage,
+        }
+
+        self.client
+            .post(url)
+            .multipart(form)
+            .send()
+            .and_then(|response| response.into_body().concat2())
+            .map(|f| serde_json::from_slice(&f).unwrap())
+            .map(|u: Response| u.result.into())
+            .map_err(|_| ())
+            .compat()
+            .await
     }
 
     pub async fn get_chat_member(&self, chat_id: i64, user_id: i64) -> Result<User, ()> {

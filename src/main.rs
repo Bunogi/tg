@@ -1,4 +1,4 @@
-#![feature(async_await)]
+#![feature(async_await, unsized_locals)]
 
 #[macro_use]
 extern crate log;
@@ -41,7 +41,7 @@ async fn main() -> std::io::Result<()> {
 
     let telegram = Telegram::new(std::env::var("TELEGRAM_BOT_TOKEN").unwrap()).await;
 
-    info!("Running bot...");
+    info!("Startup complete, listening for updates...");
     loop {
         telegram
             .updates()

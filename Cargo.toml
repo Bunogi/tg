@@ -5,10 +5,13 @@ name = "tg"
 version = "0.1.0"
 
 [dependencies]
+cairo-rs = { version = "0.7.0", features = ["png"] }
 chrono = "0.4.6"
 env_logger="0.6.1"
 futures-preview = { version = "0.3.0-alpha.16", features = ["compat"] }
 futures01 = { package = "futures", version = "0.1"}
+libc = "0.2.58"
+libwebp-sys = "0.2.0"
 log = "0.4.6"
 quick-error = "1.2.2"
 reqwest = "0.9.17"
