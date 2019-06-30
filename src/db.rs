@@ -3,19 +3,31 @@ use rusqlite::Connection;
 use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct AsyncSqlConnection {
-    inner: Arc<Mutex<Connection>>,
+pub struct SqlPool {
+    connections: Vec<Arc<Mutex<Connection>>>,
+    path: String,
 }
 
-//TODO connection pooling
-impl AsyncSqlConnection {
-    pub fn new(conn: Connection) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(conn)),
+impl SqlPool {
+    pub fn new(max_connections: usize, path: &str) -> rusqlite::Result<Self> {
+        let mut connections = Vec::new();
+        let path = path.to_string();
+        for _ in 0..max_connections {
+            let conn = Arc::new(Mutex::new(rusqlite::Connection::open(&path)?));
+            connections.push(conn);
         }
+        Ok(Self { connections, path })
     }
     pub async fn get(&self) -> MutexGuard<Connection> {
-        self.inner.lock().await
+        for conn in self.connections.iter() {
+            if let Some(lock) = conn.try_lock() {
+                return lock;
+            }
+        }
+
+        //No free connections found, get the first available one
+        let lockers = self.connections.iter().map(|l| l.lock());
+        futures::future::select_all(lockers).await.0
     }
 }
 

@@ -1,4 +1,4 @@
-use futures::{lock::Mutex, prelude::*};
+use futures::{lock::{Mutex, MutexGuard}, prelude::*};
 
 use quick_error::quick_error;
 use runtime::net::TcpStream;
@@ -6,6 +6,34 @@ use serde::de::DeserializeOwned;
 use std::io;
 use std::sync::Arc;
 use std::time;
+
+#[derive(Clone)]
+pub struct RedisPool {
+    connections: Vec<Arc<Mutex<RedisConnection>>>
+}
+
+impl RedisPool {
+    pub async fn new(max_connections: usize) -> Result<Self> {
+        let mut connections = Vec::new();
+        for _ in 0..max_connections {
+            let conn = Arc::new(Mutex::new(RedisConnection::connect().await?));
+            connections.push(conn);
+        }
+        Ok(Self { connections})
+    }
+
+    pub async fn get(&self) -> MutexGuard<RedisConnection> {
+        for conn in self.connections.iter() {
+            if let Some(lock) = conn.try_lock() {
+                return lock;
+            }
+        }
+
+        //No free connections found, get the first available one
+        let lockers = self.connections.iter().map(|l| l.lock());
+        futures::future::select_all(lockers).await.0
+    }
+}
 
 #[derive(Clone)]
 pub struct RedisConnection {

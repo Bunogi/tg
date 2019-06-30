@@ -1,7 +1,7 @@
 use crate::commands::handle_command;
-use crate::db::AsyncSqlConnection;
+use crate::db::SqlPool;
 use crate::include_sql;
-use crate::redis::RedisConnection;
+use crate::redis::RedisPool;
 use crate::telegram::{
     message::{Message, MessageData},
     update::Update,
@@ -12,16 +12,16 @@ use crate::util::get_unix_timestamp;
 pub async fn handle_update(
     context: Telegram,
     update: Update,
-    redis: RedisConnection,
-    db: AsyncSqlConnection,
+    redis_pool: RedisPool,
+    db_pool: SqlPool,
 ) {
     use Update::*;
     match update {
         Message(ref msg) => {
-            handle_message(msg, context.clone(), redis.clone(), db.clone()).await;
+            handle_message(msg, context.clone(), redis_pool.clone(), db_pool.clone()).await;
         }
         MessageEdited(msg) => {
-            let lock = db.get().await;
+            let lock = db_pool.get().await;
             lock.execute(
                 include_sql!("logedit.sql"),
                 params![msg.chat.id as isize, msg.from.id as isize, msg.id as isize],
@@ -39,17 +39,17 @@ pub async fn handle_update(
 async fn handle_message(
     msg: &Message,
     context: Telegram,
-    redis: RedisConnection,
-    db: AsyncSqlConnection,
+    redis_pool: RedisPool,
+    db_pool: SqlPool,
 ) {
     match msg.data {
         MessageData::Text(ref text) => {
             //Is command
             if text.chars().nth(0).unwrap() == '/' {
-                handle_command(&msg, text, context, redis, db).await;
+                handle_command(&msg, text, context, redis_pool, db_pool).await;
             } else {
                 let unix_time = get_unix_timestamp();
-                let lock = db.get().await;
+                let lock = db_pool.get().await;
                 lock.execute(
                     include_sql!("logmessage.sql"),
                     params![
@@ -65,7 +65,7 @@ async fn handle_message(
         }
         MessageData::Sticker(ref sticker) => {
             let unix_time = get_unix_timestamp();
-            let lock = db.get().await;
+            let lock = db_pool.get().await;
             lock.execute(
                 include_sql!("logsticker.sql"),
                 params![

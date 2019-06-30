@@ -1,6 +1,6 @@
-use crate::db::AsyncSqlConnection;
+use crate::db::SqlPool;
 use crate::include_sql;
-use crate::redis::RedisConnection;
+use crate::redis::RedisPool;
 use crate::telegram::{chat::ChatType, message::Message, Telegram};
 use crate::util::{get_user, rgba_to_cairo};
 use cairo::Format;
@@ -23,8 +23,8 @@ fn get_command<'a>(input: &'a str, botname: &'a str) -> Option<&'a str> {
 pub async fn leaderboards<'a>(
     chatid: i64,
     context: Telegram,
-    redis: RedisConnection,
-    db: AsyncSqlConnection,
+    redis_pool: RedisPool,
+    db: SqlPool,
 ) {
     let conn = db.get().await;
     let messages = match conn
@@ -76,6 +76,7 @@ pub async fn leaderboards<'a>(
     };
 
     let since = chrono::Local.timestamp(since as i64, 0);
+    let redis = redis_pool.get().await;
 
     //Message counts
     let mut reply = format!("{} messages since {}\n", total_msgs, since);
@@ -128,8 +129,8 @@ pub async fn leaderboards<'a>(
 pub async fn stickerlog(
     msg: &Message,
     context: Telegram,
-    mut redis: RedisConnection,
-    db: AsyncSqlConnection,
+    redis_pool: RedisPool,
+    db: SqlPool,
 ) {
     let (caption, images, usages) = {
         //Do in block to limit time conn is locked TODO make conn have connection pooling
@@ -165,6 +166,7 @@ pub async fn stickerlog(
 
         let (file_ids, usages): (Vec<String>, Vec<i32>) = logs.into_iter().unzip();
         //Get sticker images
+        let mut redis = redis_pool.get().await;
         let mut images = Vec::new();
         for f in file_ids {
             let key = format!("tg.download.{}", f);
@@ -293,8 +295,8 @@ pub async fn handle_command<'a>(
     msg: &'a Message,
     msg_text: &'a str,
     context: Telegram,
-    redis: RedisConnection,
-    db: AsyncSqlConnection,
+    redis_pool: RedisPool,
+    db_pool: SqlPool,
 ) {
     let split: Vec<String> = msg_text.split_whitespace().map(|s| s.into()).collect();
     let root = if let ChatType::Private = msg.chat.kind {
@@ -308,9 +310,9 @@ pub async fn handle_command<'a>(
     };
     match root {
         "/leaderboards" => {
-            leaderboards(msg.chat.id, context.clone(), redis.clone(), db.clone()).await
+            leaderboards(msg.chat.id, context.clone(), redis_pool.clone(), db_pool.clone()).await
         }
-        "/stickerlog" => stickerlog(msg, context.clone(), redis.clone(), db.clone()).await,
+        "/stickerlog" => stickerlog(msg, context.clone(), redis_pool.clone(), db_pool.clone()).await,
         _ => {
             if let ChatType::Private = msg.chat.kind {
                 //Only nag at the user for wrong command if in a private chat
