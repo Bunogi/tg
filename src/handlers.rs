@@ -40,7 +40,7 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
         MessageData::Text(ref text) => {
             //Is command
             if text.chars().nth(0).unwrap() == '/' {
-                handle_command(&msg, text, context, redis_pool, db_pool).await;
+                handle_command(&msg, text, context, redis_pool, db_pool.clone()).await;
             } else {
                 let unix_time = chrono::Utc::now().timestamp();
                 let lock = db_pool.get().await;
@@ -76,6 +76,21 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
         }
         _ => (),
     }
+
+    //Take a snapshot of the user's data
+    let conn = db_pool.get().await;
+    conn.execute(
+        include_sql!("updateuserdata.sql"),
+        params![
+            msg.from.id as isize,
+            msg.chat.id,
+            msg.from.first_name,
+            msg.from.last_name,
+            msg.from.username
+        ],
+    )
+    .unwrap();
+
     info!(
         "[{}] <{}>: {}",
         msg.chat.kind,

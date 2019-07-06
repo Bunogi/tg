@@ -178,18 +178,18 @@ impl RedisConnection {
         }
     }
 
-    pub async fn get<'a, D>(&'a mut self, key: &'a str) -> Result<Option<D>>
-    where
-        D: DeserializeOwned,
-    {
-        let buf = self.get_bytes(key).await?;
-        if let Some(buf) = buf {
-            let deserialized = serde_json::from_slice(&buf).unwrap();
-            Ok(Some(deserialized))
-        } else {
-            Ok(None)
-        }
-    }
+    // pub async fn get<'a, D>(&'a mut self, key: &'a str) -> Result<Option<D>>
+    // where
+    //     D: DeserializeOwned,
+    // {
+    //     let buf = self.get_bytes(key).await?;
+    //     if let Some(buf) = buf {
+    //         let deserialized = serde_json::from_slice(&buf).unwrap();
+    //         Ok(Some(deserialized))
+    //     } else {
+    //         Ok(None)
+    //     }
+    // }
 
     pub async fn get_bytes<'a>(&'a mut self, key: &'a str) -> Result<Option<Vec<u8>>> {
         let mut stream = self.stream.lock().await;

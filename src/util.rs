@@ -1,6 +1,9 @@
+use crate::db::SqlPool;
+use crate::include_sql;
 use crate::redis::RedisConnection;
 use crate::telegram::{user::User, Telegram};
 use chrono::Duration;
+use rusqlite::OptionalExtension;
 
 //Will get the user from cache if it is cached, otherwise request the data
 pub async fn get_user(
@@ -9,13 +12,13 @@ pub async fn get_user(
     context: Telegram,
     mut redis: RedisConnection,
 ) -> User {
-    let user_path = format!("chat.\"{}\".\"{}\"", chat_id, user_id);
-    match redis.get(&user_path).await.unwrap() {
-        Some(u) => u,
+    let user_path = format!("tg.user.\"{}\".\"{}\"", chat_id, user_id);
+    match redis.get_bytes(&user_path).await.unwrap() {
+        Some(u) => rmp_serde::from_slice(&u).unwrap(),
         None => {
             debug!("Getting user from tg");
             let user = context.get_chat_member(chat_id, user_id).await.unwrap();
-            let serialized = serde_json::to_string(&user).unwrap();
+            let serialized = rmp_serde::to_vec(&user).unwrap();
             redis
                 .set_with_expiry(
                     &user_path,
@@ -55,6 +58,19 @@ pub fn parse_time(input: &[String]) -> Option<Duration> {
             _ => None,
         }
     }
+}
+
+//Returns the last known user id matching name in chat_id
+//If multiple users match, it will pick one at complete random due to how SQLite works
+pub async fn get_user_id(chat_id: i64, name: &str, pool: SqlPool) -> Option<i64> {
+    let conn = pool.get().await;
+    conn.query_row(
+        include_sql!("getuseridfromname.sql"),
+        params![chat_id as isize, name],
+        |row| Ok(row.get(0)?),
+    )
+    .optional()
+    .unwrap()
 }
 
 pub unsafe fn rgba_to_cairo(mut ptr: *mut u8, len: usize) {

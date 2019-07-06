@@ -21,3 +21,12 @@ CREATE TABLE IF NOT EXISTS StickerLogs (
   emoji TEXT,
   instant INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS LastUserData (
+  id INTEGER,
+  chatid INTEGER,
+  firstname TEXT NOT NULL,
+  lastname TEXT,
+  username TEXT,
+  PRIMARY KEY(id, chatid)
+);

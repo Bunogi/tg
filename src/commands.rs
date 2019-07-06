@@ -2,11 +2,12 @@ use crate::db::SqlPool;
 use crate::include_sql;
 use crate::redis::RedisPool;
 use crate::telegram::{chat::ChatType, message::Message, Telegram};
-use crate::util::{get_user, parse_time, rgba_to_cairo};
+use crate::util::{get_user, get_user_id, parse_time, rgba_to_cairo};
 use cairo::Format;
 use chrono::offset::TimeZone;
 use chrono::prelude::*;
 use libc::c_int;
+use markov::Chain;
 
 //Resolves commands written like /command@foobot which telegram does automatically. Cannot support '@' in command names.
 fn get_command<'a>(input: &'a str, botname: &'a str) -> Option<&'a str> {
@@ -21,7 +22,7 @@ fn get_command<'a>(input: &'a str, botname: &'a str) -> Option<&'a str> {
     }
 }
 
-pub async fn leaderboards<'a>(
+async fn leaderboards<'a>(
     chatid: i64,
     context: Telegram,
     redis_pool: RedisPool,
@@ -317,6 +318,66 @@ pub async fn stickerlog<'a>(
         .map_err(|e| format!("sending image: {:?}", e))
 }
 
+async fn simulate(
+    userid: i64,
+    chatid: i64,
+    context: Telegram,
+    redis_pool: RedisPool,
+    db_pool: SqlPool,
+) -> Result<(), String> {
+    let key = format!("tg.markovchain.\"{}\".\"{}\"", chatid, userid);
+    let mut redis = redis_pool.get().await;
+    let chain = match redis.get_bytes(&key).await {
+        Ok(Some(s)) => {
+            //A cached version exists, use that
+            let value: Chain<String> = rmp_serde::from_slice(&s)
+                .map_err(|e| format!("deserializing markov chain at {}: {}", key, e))?;
+            Ok(value)
+        }
+        Ok(None) => {
+            //Create a new chain
+            let mut chain = Chain::new();
+            let messages = db_pool
+                .get()
+                .await
+                .prepare_cached(include_sql!("getmessagetext.sql"))
+                .unwrap()
+                .query_map(params![chatid, userid], |row| Ok(row.get(0)?))
+                .unwrap()
+                .collect::<Result<Vec<String>, rusqlite::Error>>()
+                .map_err(|e| format!("getting user message text: {:?}", e))?;
+
+            for m in messages {
+                chain.feed_str(&m);
+            }
+
+            //Cache for later
+            let serialized = rmp_serde::to_vec(&chain).unwrap();
+            redis
+                .set_with_expiry(&key, serialized, std::time::Duration::new(3600, 0))
+                .await
+                .unwrap();
+            Ok(chain)
+        }
+        Err(e) => Err(format!("redis failure getting markov chain data: {}", e)),
+    }?;
+
+    let mut output = format!(
+        "{}<s>: {}",
+        get_user(chatid, userid, context.clone(), redis.clone()).await,
+        chain.generate_str()
+    );
+
+    //Telegram limits message size
+    output.truncate(4000);
+
+    context
+        .send_message_silent(chatid, output)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("sending simulated string: {:?}", e))
+}
+
 pub async fn handle_command<'a>(
     msg: &'a Message,
     msg_text: &'a str,
@@ -353,6 +414,39 @@ pub async fn handle_command<'a>(
                 db_pool.clone(),
             )
             .await
+        }
+        "/simulate" => {
+            if split.len() == 2 {
+                match get_user_id(msg.chat.id, &split[1], db_pool.clone()).await {
+                    Some(u) => {
+                        simulate(
+                            u,
+                            msg.chat.id,
+                            context.clone(),
+                            redis_pool.clone(),
+                            db_pool.clone(),
+                        )
+                        .await
+                    }
+                    None => context
+                        .send_message_silent(
+                            msg.chat.id,
+                            format!("I haven't seen {} yet", &split[1]),
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| format!("sending invalid user message: {:?}", e)),
+                }
+            } else {
+                context
+                    .send_message_silent(
+                        msg.chat.id,
+                        "Expected user, first name or last name".to_string(),
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| format!("sending error message: {:?}", e))
+            }
         }
         _ => {
             if let ChatType::Private = msg.chat.kind {
