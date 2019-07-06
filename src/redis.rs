@@ -16,7 +16,7 @@ pub struct RedisPool {
 }
 
 impl RedisPool {
-    pub async fn new(max_connections: usize) -> Result<Self> {
+    pub async fn create(max_connections: usize) -> Result<Self> {
         let mut connections = Vec::new();
         for _ in 0..max_connections {
             let conn = Arc::new(Mutex::new(RedisConnection::connect().await?));

@@ -2,9 +2,10 @@ use crate::db::SqlPool;
 use crate::include_sql;
 use crate::redis::RedisPool;
 use crate::telegram::{chat::ChatType, message::Message, Telegram};
-use crate::util::{get_user, rgba_to_cairo};
+use crate::util::{get_user, parse_time, rgba_to_cairo};
 use cairo::Format;
 use chrono::offset::TimeZone;
+use chrono::prelude::*;
 use libc::c_int;
 
 //Resolves commands written like /command@foobot which telegram does automatically. Cannot support '@' in command names.
@@ -111,20 +112,32 @@ pub async fn leaderboards<'a>(
         .map_err(|e| format!("sending message: {:?}", e))
 }
 
-pub async fn stickerlog(
-    msg: &Message,
+pub async fn stickerlog<'a>(
+    msg: &'a Message,
+    args: &'a [String],
     context: Telegram,
     redis_pool: RedisPool,
     db: SqlPool,
 ) -> Result<(), String> {
     let (caption, images, usages) = {
+        let parsed_time = parse_time(&args[1..]);
+        if args.len() > 1 && parsed_time.is_none() {
+            context
+                .send_message_silent(msg.chat.id, "Invalid time string".to_string())
+                .await
+                .map_err(|e| format!("sending error message: {:?}", e))?;
+            return Ok(());
+        }
+        let from_time: DateTime<Utc> =
+            Utc::now() - parsed_time.unwrap_or(chrono::Duration::seconds(0));
+
         //Do in block to limit time conn is locked, since the rendering can be pretty time-consuming.
         let conn = db.get().await;
         //Build caption message
-        let (total_stickers, packs, since): (isize, isize, isize) = conn
+        let res = conn
             .query_row(
                 include_sql!("getstickerstats.sql"),
-                params![msg.chat.id as isize],
+                params![msg.chat.id as isize, from_time.timestamp() as isize],
                 |row| {
                     let total_stickers = row.get(0)?;
                     let packs = row.get(1)?;
@@ -134,18 +147,36 @@ pub async fn stickerlog(
             )
             .map_err(|e| format!("getting sticker stats: {:?}", e))?;
 
+        //For some reason type inferrance breaks when trying to assign these directly
+        let (total_stickers, packs, since): (isize, isize, isize) = res;
+
+        if total_stickers == 0 {
+            context
+                .send_message_silent(
+                    msg.chat.id,
+                    format!("I have no logged stickers in this chat after {}", from_time),
+                )
+                .await
+                .map_err(|e| format!("sending error message: {:?}", e))?;
+
+            return Ok(());
+        }
+
         let caption = format!(
             "{} sent stickers from {} packs since {}",
             total_stickers,
             packs,
-            chrono::Local.timestamp(since as i64, 0)
+            chrono::Utc.timestamp(since as i64, 0)
         );
 
         //Image rendering data
         let logs = conn
             .prepare_cached(include_sql!("getstickercounts.sql"))
             .unwrap()
-            .query_map(rusqlite::NO_PARAMS, |row| Ok((row.get(0)?, row.get(1)?)))
+            .query_map(
+                params![msg.chat.id as isize, from_time.timestamp() as isize],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
             .unwrap()
             .collect::<Result<Vec<(String, i32)>, rusqlite::Error>>()
             .map_err(|e| format!("getting sticker counts: {:?}", e))?;
@@ -314,7 +345,14 @@ pub async fn handle_command<'a>(
             .await
         }
         "/stickerlog" => {
-            stickerlog(msg, context.clone(), redis_pool.clone(), db_pool.clone()).await
+            stickerlog(
+                msg,
+                &split,
+                context.clone(),
+                redis_pool.clone(),
+                db_pool.clone(),
+            )
+            .await
         }
         _ => {
             if let ChatType::Private = msg.chat.kind {

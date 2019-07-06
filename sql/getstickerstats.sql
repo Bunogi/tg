@@ -1,5 +1,5 @@
 SELECT COUNT(*) AS totalStickers,
        COUNT(DISTINCT packname) AS packs,
-       MIN(instant) AS earliest
+       IFNULL(MIN(instant), 0) AS earliest
   FROM StickerLogs
- WHERE chatid = ?
+ WHERE chatid = ? AND instant > ?

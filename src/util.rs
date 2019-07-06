@@ -1,6 +1,6 @@
 use crate::redis::RedisConnection;
 use crate::telegram::{user::User, Telegram};
-use std::time::{SystemTime, UNIX_EPOCH};
+use chrono::Duration;
 
 //Will get the user from cache if it is cached, otherwise request the data
 pub async fn get_user(
@@ -29,11 +29,32 @@ pub async fn get_user(
     }
 }
 
-pub fn get_unix_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+pub fn parse_time(input: &[String]) -> Option<Duration> {
+    //n year(s)/month(s)/week(s)/day(s)
+    if input.len() != 2 {
+        None
+    } else {
+        if input[0].contains('-') {
+            return None;
+        }
+
+        let num = input[0].parse::<i64>().ok()?;
+        let name = if input[1].ends_with('s') {
+            &input[1][..input[1].len() - 1]
+        } else {
+            input[1].as_str()
+        };
+        match name.to_lowercase().as_str() {
+            "year" => Some(Duration::days(num * 365)),
+            "month" => Some(Duration::weeks(num * 4)),
+            "week" => Some(Duration::weeks(num)),
+            "day" => Some(Duration::days(num)),
+            "hour" => Some(Duration::hours(num)),
+            "minute" => Some(Duration::minutes(num)),
+            "second" => Some(Duration::seconds(num)),
+            _ => None,
+        }
+    }
 }
 
 pub unsafe fn rgba_to_cairo(mut ptr: *mut u8, len: usize) {

@@ -23,7 +23,7 @@ async fn main() -> std::io::Result<()> {
     const MAX_CONNECTIONS: usize = 4;
     env_logger::init();
     info!("Opening redis connections...");
-    let redis_pool = match redis::RedisPool::new(MAX_CONNECTIONS).await {
+    let redis_pool = match redis::RedisPool::create(MAX_CONNECTIONS).await {
         Ok(c) => c,
         Err(e) => {
             error!("Failed to connect to redis: {}", e);

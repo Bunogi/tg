@@ -7,7 +7,6 @@ use crate::telegram::{
     update::Update,
     Telegram,
 };
-use crate::util::get_unix_timestamp;
 
 pub async fn handle_update(
     context: Telegram,
@@ -43,7 +42,7 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
             if text.chars().nth(0).unwrap() == '/' {
                 handle_command(&msg, text, context, redis_pool, db_pool).await;
             } else {
-                let unix_time = get_unix_timestamp();
+                let unix_time = chrono::Utc::now().timestamp();
                 let lock = db_pool.get().await;
                 lock.execute(
                     include_sql!("logmessage.sql"),
@@ -59,7 +58,7 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
             }
         }
         MessageData::Sticker(ref sticker) => {
-            let unix_time = get_unix_timestamp();
+            let unix_time = chrono::Utc::now().timestamp();
             let lock = db_pool.get().await;
             lock.execute(
                 include_sql!("logsticker.sql"),
