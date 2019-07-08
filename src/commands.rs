@@ -156,7 +156,10 @@ pub async fn stickerlog<'a>(
             context
                 .send_message_silent(
                     msg.chat.id,
-                    format!("I have no logged stickers in this chat after {}", from_time),
+                    format!(
+                        "I have no logged stickers in this chat after {}",
+                        from_time.with_timezone(&Local)
+                    ),
                 )
                 .await
                 .map_err(|e| format!("sending error message: {:?}", e))?;
@@ -168,7 +171,7 @@ pub async fn stickerlog<'a>(
             "{} sent stickers from {} packs since {}",
             total_stickers,
             packs,
-            chrono::Utc.timestamp(since as i64, 0)
+            Utc.timestamp(since as i64, 0).with_timezone(&Local)
         );
 
         //Image rendering data
