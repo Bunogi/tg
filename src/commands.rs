@@ -8,6 +8,8 @@ use chrono::{prelude::*, NaiveDateTime, Utc};
 use libc::c_int;
 use markov::Chain;
 
+const TIME_FORMAT: &str = "%A, %e %B %Y %H:%M:%S %Z";
+
 //Resolves commands written like /command@foobot which telegram does automatically. Cannot support '@' in command names.
 fn get_command<'a>(input: &'a str, botname: &'a str) -> Option<&'a str> {
     if let Some(at) = input.find('@') {
@@ -143,22 +145,21 @@ pub async fn stickerlog<'a>(
                 |row| {
                     let total_stickers = row.get(0)?;
                     let packs = row.get(1)?;
-                    let earliest = row.get(2)?;
-                    Ok((total_stickers, packs, earliest))
+                    Ok((total_stickers, packs))
                 },
             )
             .map_err(|e| format!("getting sticker stats: {:?}", e))?;
 
         //For some reason type inferrance breaks when trying to assign these directly
-        let (total_stickers, packs, since): (isize, isize, isize) = res;
+        let (total_stickers, packs): (isize, isize) = res;
 
         if total_stickers == 0 {
             context
                 .send_message_silent(
                     msg.chat.id,
                     format!(
-                        "I have no logged stickers in this chat after {}",
-                        from_time.with_timezone(&Local)
+                        "I have no recorded stickers after {}",
+                        from_time.with_timezone(&Local).format(TIME_FORMAT)
                     ),
                 )
                 .await
@@ -171,7 +172,11 @@ pub async fn stickerlog<'a>(
             "{} sent stickers from {} packs since {}",
             total_stickers,
             packs,
-            Utc.timestamp(since as i64, 0).with_timezone(&Local)
+            if from_time.naive_utc().timestamp() == 0 {
+                "the dawn of time".to_string()
+            } else {
+                format!("{}", from_time.with_timezone(&Local).format(TIME_FORMAT))
+            }
         );
 
         //Image rendering data
