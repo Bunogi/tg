@@ -4,8 +4,7 @@ use crate::redis::RedisPool;
 use crate::telegram::{chat::ChatType, message::Message, Telegram};
 use crate::util::{get_user, get_user_id, parse_time, rgba_to_cairo};
 use cairo::Format;
-use chrono::offset::TimeZone;
-use chrono::prelude::*;
+use chrono::{prelude::*, NaiveDateTime, Utc};
 use libc::c_int;
 use markov::Chain;
 
@@ -129,8 +128,10 @@ pub async fn stickerlog<'a>(
                 .map_err(|e| format!("sending error message: {:?}", e))?;
             return Ok(());
         }
-        let from_time: DateTime<Utc> =
-            Utc::now() - parsed_time.unwrap_or(chrono::Duration::seconds(0));
+        let from_time: DateTime<Utc> = match parsed_time {
+            Some(t) => Utc::now() - t,
+            None => DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
+        };
 
         //Do in block to limit time conn is locked, since the rendering can be pretty time-consuming.
         let conn = db.get().await;

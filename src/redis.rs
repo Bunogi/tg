@@ -5,7 +5,6 @@ use futures::{
 
 use quick_error::quick_error;
 use runtime::net::TcpStream;
-use serde::de::DeserializeOwned;
 use std::io;
 use std::sync::Arc;
 use std::time;
