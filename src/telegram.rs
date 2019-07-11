@@ -238,7 +238,6 @@ impl Telegram {
         caption: Option<String>,
         silent: bool,
     ) -> Result<Message, ()> {
-        // let path = format!("/sendPhoto?chat_id={}", chat_id)
         let url = self.get_url("sendPhoto");
         let form = multipart::Form::new()
             .part("photo", multipart::Part::bytes(data).file_name("image.png"))

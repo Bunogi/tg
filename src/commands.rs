@@ -423,6 +423,42 @@ async fn simulate(
         .map_err(|e| format!("sending simulated string: {:?}", e))
 }
 
+pub async fn quote(
+    userid: i64,
+    chatid: i64,
+    context: Telegram,
+    db_pool: SqlPool,
+    redis_pool: RedisPool,
+) -> Result<(), String> {
+    let (message, timestamp): (String, isize) = db_pool
+        .get()
+        .await
+        .query_row(
+            include_sql!("getrandomusermessage.sql"),
+            params![chatid, userid],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+
+    let date: DateTime<Utc> = Utc.timestamp(timestamp as i64, 0);
+
+    let redis = redis_pool.get().await;
+
+    context
+        .send_message_silent(
+            chatid,
+            format!(
+                "\"{}\" -- {}, {}",
+                message,
+                get_user(chatid, userid, context.clone(), redis.clone()).await,
+                date
+            ),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("sending qoute: {:?}", e))
+}
+
 pub async fn handle_command<'a>(
     msg: &'a Message,
     msg_text: &'a str,
@@ -440,38 +476,14 @@ pub async fn handle_command<'a>(
         }
         command.unwrap()
     };
-    let res = match root {
-        "/leaderboards" => {
-            leaderboards(
-                msg.chat.id,
-                context.clone(),
-                redis_pool.clone(),
-                db_pool.clone(),
-            )
-            .await
-        }
-        "/stickerlog" => {
-            stickerlog(
-                msg,
-                &split,
-                context.clone(),
-                redis_pool.clone(),
-                db_pool.clone(),
-            )
-            .await
-        }
-        "/simulate" => {
+
+    //Macro for extracting user name
+    macro_rules! with_user {
+        ($fun:ident ( _, $( $arg:expr ),* ) ) => {
             if split.len() == 2 {
                 match get_user_id(msg.chat.id, &split[1], db_pool.clone()).await {
                     Some(u) => {
-                        simulate(
-                            u,
-                            msg.chat.id,
-                            context.clone(),
-                            redis_pool.clone(),
-                            db_pool.clone(),
-                        )
-                        .await
+                        $fun(u, $($arg),*).await
                     }
                     None => context
                         .send_message_silent(
@@ -492,6 +504,33 @@ pub async fn handle_command<'a>(
                     .map(|_| ())
                     .map_err(|e| format!("sending error message: {:?}", e))
             }
+        };
+    }
+    let res = match root {
+        "/leaderboards" => {
+            leaderboards(
+                msg.chat.id,
+                context.clone(),
+                redis_pool.clone(),
+                db_pool.clone(),
+            )
+            .await
+        }
+        "/stickerlog" => {
+            stickerlog(
+                msg,
+                &split,
+                context.clone(),
+                redis_pool.clone(),
+                db_pool.clone(),
+            )
+            .await
+        }
+        "/quote" => {
+            with_user!(quote(_, msg.chat.id, context.clone(), db_pool.clone(), redis_pool.clone()))
+        }
+        "/simulate" => {
+            with_user!(simulate(_, msg.chat.id, context.clone(), redis_pool.clone(), db_pool.clone()))
         }
         _ => {
             if let ChatType::Private = msg.chat.kind {
