@@ -126,10 +126,6 @@ impl Telegram {
         &self.bot_mention
     }
 
-    pub fn bot_user<'a>(&'a self) -> &'a User {
-        &self.bot_user
-    }
-
     pub fn updates<'a>(&'a self) -> UpdateStream<'a> {
         let url = self.get_url("getUpdates");
         UpdateStream::new(&self.client, url)
