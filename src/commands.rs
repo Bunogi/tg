@@ -440,7 +440,7 @@ pub async fn quote(
         )
         .unwrap();
 
-    let date: DateTime<Utc> = Utc.timestamp(timestamp as i64, 0);
+    let date: DateTime<Local> = Utc.timestamp(timestamp as i64, 0).with_timezone(&Local);
 
     let redis = redis_pool.get().await;
 
