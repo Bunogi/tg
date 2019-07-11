@@ -1,3 +1,4 @@
-SELECT message
+SELECT message, userid, instant
   FROM MessageLogs
- WHERE chatid = ? AND userid = ?
+ WHERE chatid = ?
+ ORDER BY instant ASC

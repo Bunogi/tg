@@ -11,7 +11,7 @@ use markov::Chain;
 const TIME_FORMAT: &str = "%A, %e %B %Y %H:%M:%S %Z";
 
 //Resolves commands written like /command@foobot which telegram does automatically. Cannot support '@' in command names.
-fn get_command<'a>(input: &'a str, botname: &'a str) -> Option<&'a str> {
+fn get_command<'a>(input: &'a str, botname: &str) -> Option<&'a str> {
     if let Some(at) = input.find('@') {
         if &input[at..] == botname {
             Some(&input[..at])
@@ -327,6 +327,30 @@ pub async fn stickerlog<'a>(
         .map_err(|e| format!("sending image: {:?}", e))
 }
 
+struct MessageData {
+    message: String,
+    userid: i64,
+    instant: i64,
+}
+
+//How long until a message gets timed out
+const MESSAGE_COMBINE_TIMEOUT: i64 = 30;
+
+//Take as many messages as possible and merge them to create a more cohesive message
+//resulting in much better training data for the markov chains
+fn merge_messages(messages: &[MessageData], mut index: usize) -> (usize, String) {
+    let mut output = messages[index].message.clone();
+    while index + 1 < messages.len()
+        && messages[index].userid == messages[index + 1].userid
+        && (messages[index + 1].instant - messages[index].instant) < MESSAGE_COMBINE_TIMEOUT
+    {
+        index += 1;
+        output += &format!(" {}", messages[index].message); //add a space inbetween each
+    }
+
+    (index, output)
+}
+
 async fn simulate(
     userid: i64,
     chatid: i64,
@@ -334,7 +358,7 @@ async fn simulate(
     redis_pool: RedisPool,
     db_pool: SqlPool,
 ) -> Result<(), String> {
-    let key = format!("tg.markovchain.\"{}\".\"{}\"", chatid, userid);
+    let key = format!("tg.markovchain.{}.{}", chatid, userid);
     let mut redis = redis_pool.get().await;
     let chain = match redis.get_bytes(&key).await {
         Ok(Some(s)) => {
@@ -351,15 +375,27 @@ async fn simulate(
                 .await
                 .prepare_cached(include_sql!("getmessagetext.sql"))
                 .unwrap()
-                .query_map(params![chatid, userid], |row| Ok(row.get(0)?))
+                .query_map(params![chatid], |row| {
+                    Ok(MessageData {
+                        message: row.get(0)?,
+                        userid: row.get(1)?,
+                        instant: row.get(2)?,
+                    })
+                })
                 .unwrap()
-                .collect::<Result<Vec<String>, rusqlite::Error>>()
+                .collect::<Result<Vec<MessageData>, rusqlite::Error>>()
                 .map_err(|e| format!("getting user message text: {:?}", e))?;
 
-            for m in messages {
-                chain.feed_str(&m);
+            let mut i = 0;
+            while i < messages.len() {
+                if messages[i].userid == userid {
+                    let (index, merged) = merge_messages(&messages, i);
+                    chain.feed_str(&merged);
+                    i = index + 1;
+                } else {
+                    i += 1;
+                }
             }
-
             //Cache for later
             let serialized = rmp_serde::to_vec(&chain).unwrap();
             redis

@@ -12,7 +12,7 @@ pub async fn get_user(
     context: Telegram,
     mut redis: RedisConnection,
 ) -> User {
-    let user_path = format!("tg.user.\"{}\".\"{}\"", chat_id, user_id);
+    let user_path = format!("tg.user.{}.{}", chat_id, user_id);
     match redis.get_bytes(&user_path).await.unwrap() {
         Some(u) => rmp_serde::from_slice(&u).unwrap(),
         None => {
