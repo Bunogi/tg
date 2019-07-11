@@ -1,7 +1,11 @@
 use crate::db::SqlPool;
 use crate::include_sql;
 use crate::redis::RedisPool;
-use crate::telegram::{chat::ChatType, message::Message, Telegram};
+use crate::telegram::{
+    chat::ChatType,
+    message::{Message, MessageData},
+    Telegram,
+};
 use crate::util::{get_user, get_user_id, parse_time, rgba_to_cairo};
 use cairo::Format;
 use chrono::{prelude::*, NaiveDateTime, Utc};
@@ -28,7 +32,7 @@ async fn leaderboards<'a>(
     context: Telegram,
     redis_pool: RedisPool,
     db: SqlPool,
-) -> Result<(), String> {
+) -> Result<Option<Message>, String> {
     let conn = db.get().await;
     let messages = conn
         .prepare_cached(include_sql!("getmessages.sql"))
@@ -110,7 +114,7 @@ async fn leaderboards<'a>(
     context
         .send_message_silent(chatid, reply)
         .await
-        .map(|_| ())
+        .map(|msg| Some(msg))
         .map_err(|e| format!("sending message: {:?}", e))
 }
 
@@ -120,15 +124,15 @@ pub async fn stickerlog<'a>(
     context: Telegram,
     redis_pool: RedisPool,
     db: SqlPool,
-) -> Result<(), String> {
+) -> Result<Option<Message>, String> {
     let (caption, images, usages) = {
         let parsed_time = parse_time(&args[1..]);
         if args.len() > 1 && parsed_time.is_none() {
-            context
+            return context
                 .send_message_silent(msg.chat.id, "Invalid time string".to_string())
                 .await
-                .map_err(|e| format!("sending error message: {:?}", e))?;
-            return Ok(());
+                .map(|msg| Some(msg))
+                .map_err(|e| format!("sending error message: {:?}", e));
         }
         let from_time: DateTime<Utc> = match parsed_time {
             Some(t) => Utc::now() - t,
@@ -154,7 +158,7 @@ pub async fn stickerlog<'a>(
         let (total_stickers, packs): (isize, isize) = res;
 
         if total_stickers == 0 {
-            context
+            return context
                 .send_message_silent(
                     msg.chat.id,
                     format!(
@@ -163,9 +167,8 @@ pub async fn stickerlog<'a>(
                     ),
                 )
                 .await
-                .map_err(|e| format!("sending error message: {:?}", e))?;
-
-            return Ok(());
+                .map(|msg| Some(msg))
+                .map_err(|e| format!("sending error message: {:?}", e));
         }
 
         let caption = format!(
@@ -323,11 +326,11 @@ pub async fn stickerlog<'a>(
     context
         .send_photo(msg.chat.id, rendered_image, Some(caption), true)
         .await
-        .map(|_| ())
+        .map(|msg| Some(msg))
         .map_err(|e| format!("sending image: {:?}", e))
 }
 
-struct MessageData {
+struct MessageInfo {
     message: String,
     userid: i64,
     instant: i64,
@@ -338,7 +341,7 @@ const MESSAGE_COMBINE_TIMEOUT: i64 = 30;
 
 //Take as many messages as possible and merge them to create a more cohesive message
 //resulting in much better training data for the markov chains
-fn merge_messages(messages: &[MessageData], mut index: usize) -> (usize, String) {
+fn merge_messages(messages: &[MessageInfo], mut index: usize) -> (usize, String) {
     let mut output = messages[index].message.clone();
     while index + 1 < messages.len()
         && messages[index].userid == messages[index + 1].userid
@@ -357,7 +360,7 @@ async fn simulate(
     context: Telegram,
     redis_pool: RedisPool,
     db_pool: SqlPool,
-) -> Result<(), String> {
+) -> Result<Option<Message>, String> {
     let key = format!("tg.markovchain.{}.{}", chatid, userid);
     let mut redis = redis_pool.get().await;
     let chain = match redis.get_bytes(&key).await {
@@ -376,14 +379,14 @@ async fn simulate(
                 .prepare_cached(include_sql!("getmessagetext.sql"))
                 .unwrap()
                 .query_map(params![chatid], |row| {
-                    Ok(MessageData {
+                    Ok(MessageInfo {
                         message: row.get(0)?,
                         userid: row.get(1)?,
                         instant: row.get(2)?,
                     })
                 })
                 .unwrap()
-                .collect::<Result<Vec<MessageData>, rusqlite::Error>>()
+                .collect::<Result<Vec<MessageInfo>, rusqlite::Error>>()
                 .map_err(|e| format!("getting user message text: {:?}", e))?;
 
             let mut i = 0;
@@ -391,10 +394,9 @@ async fn simulate(
                 if messages[i].userid == userid {
                     let (index, merged) = merge_messages(&messages, i);
                     chain.feed_str(&merged);
-                    i = index + 1;
-                } else {
-                    i += 1;
+                    i = index;
                 }
+                i += 1;
             }
             //Cache for later
             let serialized = rmp_serde::to_vec(&chain).unwrap();
@@ -419,7 +421,7 @@ async fn simulate(
     context
         .send_message_silent(chatid, output)
         .await
-        .map(|_| ())
+        .map(|msg| Some(msg))
         .map_err(|e| format!("sending simulated string: {:?}", e))
 }
 
@@ -429,7 +431,7 @@ pub async fn quote(
     context: Telegram,
     db_pool: SqlPool,
     redis_pool: RedisPool,
-) -> Result<(), String> {
+) -> Result<Option<Message>, String> {
     let (message, timestamp): (String, isize) = db_pool
         .get()
         .await
@@ -455,7 +457,7 @@ pub async fn quote(
             ),
         )
         .await
-        .map(|_| ())
+        .map(|msg| Some(msg))
         .map_err(|e| format!("sending qoute: {:?}", e))
 }
 
@@ -485,14 +487,22 @@ pub async fn handle_command<'a>(
                     Some(u) => {
                         $fun(u, $($arg),*).await
                     }
-                    None => context
-                        .send_message_silent(
-                            msg.chat.id,
-                            format!("I haven't seen {} yet", &split[1]),
-                        )
-                        .await
-                        .map(|_| ())
-                        .map_err(|e| format!("sending invalid user message: {:?}", e)),
+                    None => {
+                        let bot_user = context.bot_user();
+                        let bot_name = context.bot_mention()[1..].to_lowercase();
+                        if bot_name == split[1].to_lowercase() {
+                            $fun(bot_user.id as i64, $($arg),*).await
+                        } else {
+                            context
+                            .send_message_silent(
+                                msg.chat.id,
+                                format!("I haven't seen {} yet", &split[1]),
+                            )
+                            .await
+                            .map(|msg| Some(msg))
+                            .map_err(|e| format!("sending invalid user message: {:?}", e))
+                        }
+                    }
                 }
             } else {
                 context
@@ -501,7 +511,7 @@ pub async fn handle_command<'a>(
                         "Expected user, first name or last name".to_string(),
                     )
                     .await
-                    .map(|_| ())
+                    .map(|msg| Some(msg))
                     .map_err(|e| format!("sending error message: {:?}", e))
             }
         };
@@ -538,22 +548,43 @@ pub async fn handle_command<'a>(
                 context
                     .send_message_silent(msg.chat.id, "No such command".to_string())
                     .await
-                    .map(|_| ())
+                    .map(|_| None) // Always ignore self in private chats
                     .map_err(|e| format!("sending no such command message: {:?}", e))
             } else {
-                Ok(())
+                Ok(None)
             }
         }
     };
 
-    if let Err(e) = res {
-        error!("Command failed at '{}'", e);
-        context
-            .send_message_silent(
-                msg.chat.id,
-                "Fatal error occurred in command, see bot log".into(),
-            )
-            .await
-            .unwrap();
+    match res {
+        Ok(Some(msg)) => {
+            if let MessageData::Text(text) = msg.data {
+                db_pool
+                    .get()
+                    .await
+                    .execute(
+                        include_sql!("logmessage.sql"),
+                        params![
+                            msg.id as isize,
+                            msg.chat.id as isize,
+                            msg.from.id as isize,
+                            text,
+                            msg.date as isize,
+                        ],
+                    )
+                    .unwrap();
+            }
+        }
+        Ok(None) => (),
+        Err(e) => {
+            error!("Command failed at '{}'", e);
+            context
+                .send_message_silent(
+                    msg.chat.id,
+                    "Fatal error occurred in command, see bot log".into(),
+                )
+                .await
+                .unwrap();
+        }
     }
 }

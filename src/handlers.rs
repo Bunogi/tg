@@ -42,7 +42,6 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
             if text.chars().nth(0).unwrap() == '/' {
                 handle_command(&msg, text, context, redis_pool, db_pool.clone()).await;
             } else {
-                let unix_time = chrono::Utc::now().timestamp();
                 let lock = db_pool.get().await;
                 lock.execute(
                     include_sql!("logmessage.sql"),
@@ -51,7 +50,7 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
                         msg.chat.id as isize,
                         msg.from.id as isize,
                         text,
-                        unix_time as isize
+                        msg.date as isize
                     ],
                 )
                 .unwrap();
