@@ -58,7 +58,6 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
             }
         }
         MessageData::Sticker(ref sticker) => {
-            let unix_time = chrono::Utc::now().timestamp();
             let lock = db_pool.get().await;
             lock.execute(
                 include_sql!("logsticker.sql"),
@@ -69,7 +68,7 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
                     sticker.file_id,
                     sticker.emoji,
                     sticker.set_name,
-                    unix_time as isize,
+                    msg.date as isize,
                 ],
             )
             .unwrap();
