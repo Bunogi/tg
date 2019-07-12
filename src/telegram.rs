@@ -72,6 +72,7 @@ struct ApiMessage {
     date: u64,
     text: Option<String>,
     forward_from: Option<User>,
+    reply_to_message: Option<Box<ApiMessage>>,
     sticker: Option<Sticker>,
     chat: ApiChat,
 }
@@ -126,6 +127,10 @@ impl Telegram {
         &self.bot_mention
     }
 
+    pub fn bot_user<'a>(&'a self) -> &'a User {
+        &self.bot_user
+    }
+
     pub fn updates<'a>(&'a self) -> UpdateStream<'a> {
         let url = self.get_url("getUpdates");
         UpdateStream::new(&self.client, url)
@@ -154,6 +159,23 @@ impl Telegram {
             .map(|m: Response| m.result.into())
             .compat()
             .await
+    }
+
+    pub async fn reply_with_markup(
+        &self,
+        msg_id: u64,
+        chat_id: i64,
+        text: String,
+        markup: serde_json::Value,
+    ) -> Result<Message, ()> {
+        let json = serde_json::json!({
+            "reply_to_message_id": msg_id,
+            "chat_id": chat_id,
+            "text": text,
+            "disable_notification": true,
+            "reply_markup": markup
+        });
+        self.send_message_raw(json).await
     }
 
     pub async fn send_message_silent(&self, chat_id: i64, text: String) -> Result<Message, ()> {

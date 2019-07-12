@@ -351,12 +351,12 @@ fn merge_messages(messages: &[MessageData], mut index: usize) -> (usize, String)
     (index, output)
 }
 
-async fn simulate(
+pub async fn simulate(
     userid: i64,
     chatid: i64,
     context: Telegram,
-    redis_pool: RedisPool,
     db_pool: SqlPool,
+    redis_pool: RedisPool,
 ) -> Result<(), String> {
     let key = format!("tg.markovchain.{}.{}", chatid, userid);
     let mut redis = redis_pool.get().await;
@@ -495,14 +495,58 @@ pub async fn handle_command<'a>(
                         .map_err(|e| format!("sending invalid user message: {:?}", e)),
                 }
             } else {
-                context
-                    .send_message_silent(
+                let users = db_pool.get().await
+                    .prepare_cached(include_sql!("getchatusers.sql"))
+                    .unwrap()
+                    .query_map(params![msg.chat.id], |row| Ok(row.get(0)?))
+                    .unwrap()
+                    .collect::<Result<Vec<String>, rusqlite::Error>>()
+                    .map_err(|e| error!("Couldn't get users: {:?}", e));
+
+                if users.is_err() {
+                    return;
+                }
+
+                let mut users_iter = users.unwrap().into_iter();
+                let mut buttons = Vec::new();
+
+                while let Some(u) = users_iter.next() {
+                    let mut row = Vec::with_capacity(3);
+                    row.push(serde_json::json!({"text": u}));
+                    let mut offset = 1;
+                    while let Some(u) = users_iter.next() {
+                        row.push(serde_json::json!({"text": u}));
+                        offset += 1;
+                        if offset >= 3 { //&& is not allowed in `while let` so do this
+                            break;
+                        }
+                    }
+                    buttons.push(row);
+                }
+
+                let reply_message = context
+                    .reply_with_markup(
+                        msg.id,
                         msg.chat.id,
-                        "Expected user, first name or last name".to_string(),
+                        "Give me a user".to_string(),
+                        serde_json::json!({
+                            "keyboard": buttons,
+                            "one_time_keyboard": true,
+                            "selective": true,
+                        })
                     )
                     .await
-                    .map(|_| ())
-                    .map_err(|e| format!("sending error message: {:?}", e))
+                    .map_err(|e| format!("sending error message: {:?}", e)).unwrap();
+
+                let mut redis = redis_pool.get().await;
+
+                let key = format!("tg.replycommand.{}.{}", msg.chat.id, reply_message.id);
+                redis
+                    .set_with_expiry(&key, stringify!($fun), std::time::Duration::new(3600, 0))
+                    .await
+                    .unwrap();
+
+                Ok(())
             }
         };
     }
@@ -530,7 +574,7 @@ pub async fn handle_command<'a>(
             with_user!(quote(_, msg.chat.id, context.clone(), db_pool.clone(), redis_pool.clone()))
         }
         "/simulate" => {
-            with_user!(simulate(_, msg.chat.id, context.clone(), redis_pool.clone(), db_pool.clone()))
+            with_user!(simulate(_, msg.chat.id, context.clone(), db_pool.clone(), redis_pool.clone()))
         }
         _ => {
             if let ChatType::Private = msg.chat.kind {

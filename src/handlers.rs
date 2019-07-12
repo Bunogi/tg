@@ -7,6 +7,7 @@ use crate::telegram::{
     update::Update,
     Telegram,
 };
+use crate::util::get_user_id;
 
 pub async fn handle_update(
     context: Telegram,
@@ -73,6 +74,82 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
             )
             .unwrap();
         }
+        MessageData::Reply(ref data, ref other_message) => {
+            //Replying to the bot
+            if other_message.from.id == context.bot_user().id {
+                //Check and handle commands that support replying
+                let mut redis = redis_pool.get().await;
+                let key = format!("tg.replycommand.{}.{}", msg.chat.id, other_message.id);
+                match redis.get_bytes(&key).await {
+                    Ok(Some(command)) => {
+                        match std::str::from_utf8(&command).unwrap().trim() {
+                            //These could possibly be condensed into a macro but I'm not convinced the amount of code
+                            //that would save would actually make it better. The serious indentation is pretty
+                            //annoying though
+                            "quote" => {
+                                if let MessageData::Text(ref text) = **data {
+                                    let userid =
+                                        get_user_id(msg.chat.id, &text, db_pool.clone()).await;
+                                    if userid.is_none() {
+                                        return;
+                                    } else {
+                                        #[allow(unused_must_use)]
+                                        {
+                                            crate::commands::quote(
+                                                userid.unwrap(),
+                                                msg.chat.id,
+                                                context.clone(),
+                                                db_pool.clone(),
+                                                redis_pool.clone(),
+                                            )
+                                            .await
+                                            .map_err(
+                                                |e| {
+                                                    error!(
+                                                        "failed to quote from reply message: {:?}",
+                                                        e
+                                                    )
+                                                },
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            "simulate" => {
+                                if let MessageData::Text(ref text) = **data {
+                                    let userid =
+                                        get_user_id(msg.chat.id, &text, db_pool.clone()).await;
+                                    if userid.is_none() {
+                                        return;
+                                    } else {
+                                        #[allow(unused_must_use)]
+                                        {
+                                            crate::commands::simulate(
+                                                userid.unwrap(),
+                                                msg.chat.id,
+                                                context.clone(),
+                                                db_pool.clone(),
+                                                redis_pool.clone(),
+                                            )
+                                            .await
+                                            .map_err(|e| {
+                                                error!("failed to simulate from reply message: {:?}", e)
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            _ => error!(
+                                "invalid reply command found in redis: {}",
+                                &String::from_utf8_lossy(&command)
+                            ),
+                        }
+                    }
+                    Ok(None) => (),
+                    Err(e) => error!("redis error getting reply command: {:?}", e),
+                }
+            }
+        }
         _ => (),
     }
 
@@ -90,15 +167,5 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
     )
     .unwrap();
 
-    info!(
-        "[{}] <{}>: {}",
-        msg.chat.kind,
-        msg.from,
-        match &msg.data {
-            MessageData::Text(s) => s.to_string(),
-            MessageData::Forward(u, s) => format!("[Forwarded From {}]: {}", u, s),
-            MessageData::Other => "[Unsupported]".to_string(),
-            MessageData::Sticker(s) => format!("[{}]", s),
-        }
-    );
+    info!("[{}] <{}>: {}", msg.chat.kind, msg.from, msg.data);
 }
