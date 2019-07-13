@@ -528,7 +528,7 @@ pub async fn handle_command<'a>(
                     .reply_with_markup(
                         msg.id,
                         msg.chat.id,
-                        "Give me a user".to_string(),
+                        format!("Please select a user to {}", stringify!($fun)),
                         serde_json::json!({
                             "keyboard": buttons,
                             "one_time_keyboard": true,

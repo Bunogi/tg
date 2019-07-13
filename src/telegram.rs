@@ -123,15 +123,15 @@ impl Telegram {
         }
     }
 
-    pub fn bot_mention<'a>(&'a self) -> &'a str {
+    pub fn bot_mention(&self) -> &str {
         &self.bot_mention
     }
 
-    pub fn bot_user<'a>(&'a self) -> &'a User {
+    pub fn bot_user(&self) -> &User {
         &self.bot_user
     }
 
-    pub fn updates<'a>(&'a self) -> UpdateStream<'a> {
+    pub fn updates(&self) -> UpdateStream<'_> {
         let url = self.get_url("getUpdates");
         UpdateStream::new(&self.client, url)
     }
