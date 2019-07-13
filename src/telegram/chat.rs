@@ -1,7 +1,7 @@
 use std::convert::From;
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Chat {
     pub id: i64,
     pub kind: ChatType,
@@ -29,9 +29,7 @@ impl From<super::ApiChat> for Chat {
     }
 }
 
-impl Chat {}
-
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ChatType {
     Private,
     Group { title: String },

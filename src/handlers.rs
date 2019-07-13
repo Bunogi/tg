@@ -36,27 +36,21 @@ pub async fn handle_update(
     }
 }
 
-async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool, db_pool: SqlPool) {
+async fn log_message(msg: &Message, db_pool: SqlPool) {
     match msg.data {
         MessageData::Text(ref text) => {
-            //Is command
-            if text.chars().nth(0).unwrap() == '/' {
-                handle_command(&msg, text, context, redis_pool, db_pool.clone()).await;
-            } else {
-                let unix_time = chrono::Utc::now().timestamp();
-                let lock = db_pool.get().await;
-                lock.execute(
-                    include_sql!("logmessage.sql"),
-                    params![
-                        msg.id as isize,
-                        msg.chat.id as isize,
-                        msg.from.id as isize,
-                        text,
-                        unix_time as isize
-                    ],
-                )
-                .unwrap();
-            }
+            let lock = db_pool.get().await;
+            lock.execute(
+                include_sql!("logmessage.sql"),
+                params![
+                    msg.id as isize,
+                    msg.chat.id as isize,
+                    msg.from.id as isize,
+                    text,
+                    msg.date as isize
+                ],
+            )
+            .unwrap();
         }
         MessageData::Sticker(ref sticker) => {
             let lock = db_pool.get().await;
@@ -74,9 +68,31 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
             )
             .unwrap();
         }
+        _ => (), //other message types are not logged yet
+    }
+}
+
+async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool, db_pool: SqlPool) {
+    let mut should_log = true; //Should this message get logged?
+    match msg.data {
+        MessageData::Text(ref text) => {
+            //Is command
+            if text.chars().nth(0).unwrap() == '/' {
+                handle_command(
+                    &msg,
+                    text,
+                    context.clone(),
+                    redis_pool.clone(),
+                    db_pool.clone(),
+                )
+                .await;
+                should_log = false;
+            }
+        }
         MessageData::Reply(ref data, ref other_message) => {
             //Replying to the bot
             if other_message.from.id == context.bot_user().id {
+                should_log = false;
                 //Check and handle commands that support replying
                 let mut redis = redis_pool.get().await;
                 let key = format!("tg.replycommand.{}.{}", msg.chat.id, other_message.id);
@@ -151,6 +167,16 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
             }
         }
         _ => (),
+    }
+
+    if should_log {
+        //Replies should be logged as normal messages for now
+        if let MessageData::Reply(ref data, _) = msg.data {
+            let message = msg.with_data(data);
+            log_message(&message, db_pool.clone()).await;
+        } else {
+            log_message(msg, db_pool.clone()).await;
+        }
     }
 
     //Take a snapshot of the user's data

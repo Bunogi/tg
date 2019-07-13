@@ -2,7 +2,7 @@ use super::{chat::Chat, user::User, ApiMessage, Sticker};
 use std::convert::From;
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Message {
     pub id: u64,
     pub from: User,
@@ -53,7 +53,16 @@ impl From<ApiMessage> for Message {
     }
 }
 
-#[derive(Debug)]
+impl Message {
+    //Creates a copy of this message and hand it data. Should only be used when working with replies
+    pub fn with_data(&self, data: &MessageData) -> Self {
+        let mut out = self.clone();
+        out.data = data.clone();
+        out
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum MessageData {
     Text(String),
     Forward(User, String),

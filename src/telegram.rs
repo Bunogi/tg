@@ -40,7 +40,7 @@ struct ApiUpdate {
     // pre_checkout_query: PreCheckOutQuery,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Sticker {
     pub file_id: String,
     pub width: u32,

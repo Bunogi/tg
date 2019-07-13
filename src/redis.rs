@@ -2,7 +2,6 @@ use futures::{
     lock::{Mutex, MutexGuard},
     prelude::*,
 };
-
 use quick_error::quick_error;
 use runtime::net::TcpStream;
 use std::io;
