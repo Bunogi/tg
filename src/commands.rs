@@ -1,7 +1,11 @@
 use crate::db::SqlPool;
 use crate::include_sql;
 use crate::redis::RedisPool;
-use crate::telegram::{chat::ChatType, message::Message, Telegram};
+use crate::telegram::{
+    chat::{Chat, ChatType},
+    message::Message,
+    Telegram,
+};
 use crate::util::{get_user, get_user_id, parse_time, rgba_to_cairo};
 use cairo::Format;
 use chrono::{prelude::*, NaiveDateTime, Utc};
@@ -351,6 +355,70 @@ fn merge_messages(messages: &[MessageData], mut index: usize) -> (usize, String)
     (index, output)
 }
 
+//This function is almost identical to simulate except it creates a chain with messages from every user and not just one
+async fn simulate_chat(
+    chat: Chat,
+    context: Telegram,
+    db_pool: SqlPool,
+    redis_pool: RedisPool,
+) -> Result<(), String> {
+    let key = format!("tg.markovchain.chat.{}", chat.id);
+    let mut redis = redis_pool.get().await;
+    let chain = match redis.get_bytes(&key).await {
+        Ok(Some(s)) => {
+            //A cached version exists, use that
+            let value: Chain<String> = rmp_serde::from_slice(&s)
+                .map_err(|e| format!("deserializing markov chain at {}: {}", key, e))?;
+            Ok(value)
+        }
+        Ok(None) => {
+            //Create a new chain
+            let mut chain = Chain::new();
+            let messages = db_pool
+                .get()
+                .await
+                .prepare_cached(include_sql!("getmessagetext.sql"))
+                .unwrap()
+                .query_map(params![chat.id], |row| {
+                    Ok(MessageData {
+                        message: row.get(0)?,
+                        userid: row.get(1)?,
+                        instant: row.get(2)?,
+                    })
+                })
+                .unwrap()
+                .collect::<Result<Vec<MessageData>, rusqlite::Error>>()
+                .map_err(|e| format!("getting user message text: {:?}", e))?;
+
+            let mut i = 0;
+            while i < messages.len() {
+                let (index, merged) = merge_messages(&messages, i);
+                chain.feed_str(&merged);
+                i = index + 1;
+            }
+            //Cache for later
+            let serialized = rmp_serde::to_vec(&chain).unwrap();
+            redis
+                .set_with_expiry(&key, serialized, std::time::Duration::new(3600, 0))
+                .await
+                .unwrap();
+            Ok(chain)
+        }
+        Err(e) => Err(format!("redis failure getting markov chain data: {}", e)),
+    }?;
+
+    let mut output = format!("Simulated {}: {}", chat, chain.generate_str());
+
+    //Telegram limits message size
+    output.truncate(4000);
+
+    context
+        .send_message_silent(chat.id, output)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("sending simulated string: {:?}", e))
+}
+
 pub async fn simulate(
     userid: i64,
     chatid: i64,
@@ -551,31 +619,11 @@ pub async fn handle_command<'a>(
         };
     }
     let res = match root {
-        "/leaderboards" => {
-            leaderboards(
-                msg.chat.id,
-                context.clone(),
-                redis_pool.clone(),
-                db_pool.clone(),
-            )
-            .await
-        }
-        "/stickerlog" => {
-            stickerlog(
-                msg,
-                &split,
-                context.clone(),
-                redis_pool.clone(),
-                db_pool.clone(),
-            )
-            .await
-        }
-        "/quote" => {
-            with_user!(quote(_, msg.chat.id, context.clone(), db_pool.clone(), redis_pool.clone()))
-        }
-        "/simulate" => {
-            with_user!(simulate(_, msg.chat.id, context.clone(), db_pool.clone(), redis_pool.clone()))
-        }
+        "/leaderboards" => leaderboards(msg.chat.id, context.clone(), redis_pool, db_pool).await,
+        "/stickerlog" => stickerlog(msg, &split, context.clone(), redis_pool, db_pool).await,
+        "/quote" => with_user!(quote(_, msg.chat.id, context.clone(), db_pool, redis_pool)),
+        "/simulate" => with_user!(simulate(_, msg.chat.id, context.clone(), db_pool, redis_pool)),
+        "/simulatechat" => simulate_chat(msg.chat.clone(), context.clone(), db_pool, redis_pool).await,
         _ => {
             if let ChatType::Private = msg.chat.kind {
                 //Only nag at the user for wrong command if in a private chat

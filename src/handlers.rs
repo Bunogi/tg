@@ -193,5 +193,5 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
     )
     .unwrap();
 
-    info!("[{}] <{}>: {}", msg.chat.kind, msg.from, msg.data);
+    info!("[{}] <{}>: {}", msg.chat, msg.from, msg.data);
 }

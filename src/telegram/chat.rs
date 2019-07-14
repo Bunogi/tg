@@ -29,6 +29,17 @@ impl From<super::ApiChat> for Chat {
     }
 }
 
+impl fmt::Display for Chat {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.kind {
+            ChatType::Channel { ref title }
+            | ChatType::Group { ref title }
+            | ChatType::SuperGroup { ref title } => write!(f, "{} {}", self.kind, title),
+            ChatType::Private => write!(f, "{}", self.kind),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum ChatType {
     Private,
@@ -40,11 +51,10 @@ pub enum ChatType {
 impl fmt::Display for ChatType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ChatType::Private => write!(f, "<direct>")?,
-            ChatType::Group { ref title } => write!(f, "in group {}", title)?,
-            ChatType::SuperGroup { ref title } => write!(f, "in supergroup {}", title)?,
-            ChatType::Channel { ref title } => write!(f, "in channel {}", title)?,
+            ChatType::Private => write!(f, "private"),
+            ChatType::Group { title: _ } => write!(f, "group"),
+            ChatType::SuperGroup { title: _ } => write!(f, "supergroup"),
+            ChatType::Channel { title: _ } => write!(f, "channel"),
         }
-        Ok(())
     }
 }
