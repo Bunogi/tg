@@ -3,4 +3,4 @@ SELECT fileid, COUNT(*) AS uses
  WHERE chatid = ? AND instant > ?
  GROUP BY fileid
  ORDER BY uses DESC
- LIMIT 15
+ LIMIT 25
