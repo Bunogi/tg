@@ -3,6 +3,7 @@ use crate::db::SqlPool;
 use crate::include_sql;
 use crate::redis::RedisPool;
 use crate::telegram::{
+    chat::ChatType,
     message::{Message, MessageData},
     update::Update,
     Telegram,
@@ -73,7 +74,12 @@ async fn log_message(msg: &Message, db_pool: SqlPool) {
 }
 
 async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool, db_pool: SqlPool) {
-    let mut should_log = true; //Should this message get logged?
+    //Never log private chats
+    let mut should_log = if let ChatType::Private = msg.chat.kind {
+        false
+    } else {
+        true
+    };
     match msg.data {
         MessageData::Text(ref text) => {
             //Is command
