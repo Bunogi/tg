@@ -415,7 +415,7 @@ async fn simulate_chat(
             //Cache for later
             let serialized = rmp_serde::to_vec(&chain).unwrap();
             redis
-                .set_with_expiry(&key, serialized, std::time::Duration::new(3600, 0))
+                .set_with_expiry(&key, serialized, std::time::Duration::new(3600 * 24, 0))
                 .await
                 .unwrap();
             Ok(chain)
@@ -491,7 +491,7 @@ pub async fn simulate(
             //Cache for later
             let serialized = rmp_serde::to_vec(&chain).unwrap();
             redis
-                .set_with_expiry(&key, serialized, std::time::Duration::new(3600, 0))
+                .set_with_expiry(&key, serialized, std::time::Duration::new(3600 * 24, 0))
                 .await
                 .unwrap();
             Ok(chain)
@@ -634,7 +634,7 @@ pub async fn handle_command<'a>(
 
                 let key = format!("tg.replycommand.{}.{}", msg.chat.id, reply_message.id);
                 redis
-                    .set_with_expiry(&key, stringify!($fun), std::time::Duration::new(3600, 0))
+                    .set_with_expiry(&key, stringify!($fun), std::time::Duration::new(3600 * 24, 0))
                     .await
                     .unwrap();
 

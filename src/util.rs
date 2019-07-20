@@ -23,7 +23,7 @@ pub async fn get_user(
                 .set_with_expiry(
                     &user_path,
                     &serialized,
-                    std::time::Duration::from_millis(1000 * 3600),
+                    std::time::Duration::new(3600 * 2, 0),
                 )
                 .await
                 .unwrap();
