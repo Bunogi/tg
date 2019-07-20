@@ -232,7 +232,7 @@ pub async fn stickerlog<'a>(
         let bar_thickness = 40.0;
         let sticker_thickness = 200.0; // Target sticker thickness
         let max_height = 200.0; //Maximum sticker height
-        //Offset by a bit to prevent the text from clipping at the right edge
+                                //Offset by a bit to prevent the text from clipping at the right edge
         let width = usages.len() as i32 * (padding as i32 + sticker_thickness as i32) + 100;
 
         let y_scale = (f64::from(height) - max_height - (padding * 2.0))
@@ -624,7 +624,9 @@ pub async fn handle_command<'a>(
         "/stickerlog" => stickerlog(msg, &split, context.clone(), redis_pool, db_pool).await,
         "/quote" => with_user!(quote(_, msg.chat.id, context.clone(), db_pool, redis_pool)),
         "/simulate" => with_user!(simulate(_, msg.chat.id, context.clone(), db_pool, redis_pool)),
-        "/simulatechat" => simulate_chat(msg.chat.clone(), context.clone(), db_pool, redis_pool).await,
+        "/simulatechat" => {
+            simulate_chat(msg.chat.clone(), context.clone(), db_pool, redis_pool).await
+        }
         _ => {
             if let ChatType::Private = msg.chat.kind {
                 //Only nag at the user for wrong command if in a private chat

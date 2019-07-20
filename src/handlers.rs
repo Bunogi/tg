@@ -109,25 +109,17 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
                                     if userid.is_none() {
                                         return;
                                     } else {
-                                        #[allow(unused_must_use)]
-                                        {
-                                            crate::commands::quote(
-                                                userid.unwrap(),
-                                                msg.chat.id,
-                                                context.clone(),
-                                                db_pool.clone(),
-                                                redis_pool.clone(),
-                                            )
-                                            .await
-                                            .map_err(
-                                                |e| {
-                                                    error!(
-                                                        "failed to quote from reply message: {:?}",
-                                                        e
-                                                    )
-                                                },
-                                            );
-                                        }
+                                        let _ = crate::commands::quote(
+                                            userid.unwrap(),
+                                            msg.chat.id,
+                                            context.clone(),
+                                            db_pool.clone(),
+                                            redis_pool.clone(),
+                                        )
+                                        .await
+                                        .map_err(|e| {
+                                            error!("failed to quote from reply message: {:?}", e)
+                                        });
                                     }
                                 }
                             }
@@ -138,20 +130,17 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
                                     if userid.is_none() {
                                         return;
                                     } else {
-                                        #[allow(unused_must_use)]
-                                        {
-                                            crate::commands::simulate(
-                                                userid.unwrap(),
-                                                msg.chat.id,
-                                                context.clone(),
-                                                db_pool.clone(),
-                                                redis_pool.clone(),
-                                            )
-                                            .await
-                                            .map_err(|e| {
-                                                error!("failed to simulate from reply message: {:?}", e)
-                                            });
-                                        }
+                                        let _ = crate::commands::simulate(
+                                            userid.unwrap(),
+                                            msg.chat.id,
+                                            context.clone(),
+                                            db_pool.clone(),
+                                            redis_pool.clone(),
+                                        )
+                                        .await
+                                        .map_err(|e| {
+                                            error!("failed to simulate from reply message: {:?}", e)
+                                        });
                                     }
                                 }
                             }
