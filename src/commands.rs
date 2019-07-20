@@ -42,6 +42,14 @@ async fn leaderboards<'a>(
         .collect::<Result<Vec<(isize, isize)>, rusqlite::Error>>()
         .map_err(|e| format!("getting messages: {:?}", e))?;
 
+    if messages.len() == 0 {
+        return context
+            .send_message_silent(chatid, "Error: No logged messages in this chat".into())
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("sending no messages exist message: {:?}", e));
+    }
+
     let (total_msgs, since): (isize, isize) = conn
         .query_row(
             include_sql!("getmessagesdata.sql"),
@@ -139,7 +147,6 @@ pub async fn stickerlog<'a>(
             None => DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
         };
 
-        //Do in block to limit time conn is locked, since the rendering can be pretty time-consuming.
         let conn = db.get().await;
         //Build caption message
         let res = conn
@@ -391,6 +398,14 @@ async fn simulate_chat(
                 .collect::<Result<Vec<MessageData>, rusqlite::Error>>()
                 .map_err(|e| format!("getting user message text: {:?}", e))?;
 
+            if messages.len() == 0 {
+                return context
+                    .send_message_silent(chat.id, "Error: No logged messages in this chat".into())
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| format!("sending no messages exist message: {:?}", e));
+            }
+
             let mut i = 0;
             while i < messages.len() {
                 let (index, merged) = merge_messages(&messages, i);
@@ -455,6 +470,14 @@ pub async fn simulate(
                 .collect::<Result<Vec<MessageData>, rusqlite::Error>>()
                 .map_err(|e| format!("getting user message text: {:?}", e))?;
 
+            if messages.len() == 0 {
+                return context
+                    .send_message_silent(chatid, "Error: No logged messages in this chat".into())
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| format!("sending no messages exist message: {:?}", e));
+            }
+
             let mut i = 0;
             while i < messages.len() {
                 if messages[i].userid == userid {
@@ -507,7 +530,7 @@ pub async fn quote(
             params![chatid, userid],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .unwrap();
+        .map_err(|e| format!("getting random quote: {:?}", e))?;
 
     let date: DateTime<Local> = Utc.timestamp(timestamp as i64, 0).with_timezone(&Local);
 
@@ -619,6 +642,7 @@ pub async fn handle_command<'a>(
             }
         };
     }
+    //Potential improvement: ignore handling commands in private chats since they are explicitly not logged anyway
     let res = match root {
         "/leaderboards" => leaderboards(msg.chat.id, context.clone(), redis_pool, db_pool).await,
         "/stickerlog" => stickerlog(msg, &split, context.clone(), redis_pool, db_pool).await,
@@ -642,7 +666,7 @@ pub async fn handle_command<'a>(
     };
 
     if let Err(e) = res {
-        error!("Command failed at '{}'", e);
+        error!("Command '{}' failed at '{}'", &root[1..], e);
         context
             .send_message_silent(
                 msg.chat.id,
