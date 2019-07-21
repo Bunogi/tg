@@ -61,7 +61,7 @@ pub async fn add_point(
             .send_message_silent(
                 message.chat.id,
                 format!(
-                    "You cannot give another disaster point for another {:0.1} hours",
+                    "You can give a new disaster point in {:0.1} hours",
                     crate::util::seconds_to_hours(ttl as i32)
                 ),
             )
