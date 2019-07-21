@@ -97,7 +97,7 @@ pub async fn add_point(
         .arg(&cooldown_key.into_bytes())
         .arg(b"")
         .arg(b"EX")
-        .arg((24 * 60 * 60).to_string().as_bytes()); // 24 hour cooldown
+        .arg((3 * 60 * 60).to_string().as_bytes()); // 3 hour cooldown
 
     redis
         .run_command(command)
