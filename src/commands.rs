@@ -14,6 +14,8 @@ use markov::Chain;
 
 const TIME_FORMAT: &str = "%A, %e %B %Y %H:%M:%S %Z";
 
+pub mod disaster;
+
 //Resolves commands written like /command@foobot which telegram does automatically. Cannot support '@' in command names.
 fn get_command<'a>(input: &'a str, botname: &str) -> Option<&'a str> {
     if let Some(at) = input.find('@') {
@@ -42,7 +44,7 @@ async fn leaderboards<'a>(
         .collect::<Result<Vec<(isize, isize)>, rusqlite::Error>>()
         .map_err(|e| format!("getting messages: {:?}", e))?;
 
-    if messages.len() == 0 {
+    if messages.is_empty() {
         return context
             .send_message_silent(chatid, "Error: No logged messages in this chat".into())
             .await
@@ -398,7 +400,7 @@ async fn simulate_chat(
                 .collect::<Result<Vec<MessageData>, rusqlite::Error>>()
                 .map_err(|e| format!("getting user message text: {:?}", e))?;
 
-            if messages.len() == 0 {
+            if messages.is_empty() {
                 return context
                     .send_message_silent(chat.id, "Error: No logged messages in this chat".into())
                     .await
@@ -470,7 +472,7 @@ pub async fn simulate(
                 .collect::<Result<Vec<MessageData>, rusqlite::Error>>()
                 .map_err(|e| format!("getting user message text: {:?}", e))?;
 
-            if messages.len() == 0 {
+            if messages.is_empty() {
                 return context
                     .send_message_silent(chatid, "Error: No logged messages in this chat".into())
                     .await
@@ -551,6 +553,12 @@ pub async fn quote(
         .map_err(|e| format!("sending qoute: {:?}", e))
 }
 
+//Action constants used in the get_user macro for commands which can take a reply.
+//A small optimization could be to split these into a human readable and a redis format by using an enum type or something
+pub const ACTION_SIMULATE: &str = "simulate";
+pub const ACTION_QUOTE: &str = "quote";
+pub const ACTION_ADD_DISASTER_POINT: &str = "give a disaster point";
+
 pub async fn handle_command<'a>(
     msg: &'a Message,
     msg_text: &'a str,
@@ -569,9 +577,9 @@ pub async fn handle_command<'a>(
         command.unwrap()
     };
 
-    //Macro for extracting user name
+    //Macro for extracting user name and asking for a user using a keyboard if none is given
     macro_rules! with_user {
-        ($fun:ident ( _, $( $arg:expr ),* ) ) => {
+        ($action:ident, $fun:ident ( _, $( $arg:expr ),* ) ) => {
             if split.len() == 2 {
                 match get_user_id(msg.chat.id, &split[1], db_pool.clone()).await {
                     Some(u) => {
@@ -602,14 +610,17 @@ pub async fn handle_command<'a>(
                 let mut users_iter = users.unwrap().into_iter();
                 let mut buttons = Vec::new();
 
+                //Group into rows
+                const USERNAME_GROUP_WIDTH: usize = 3;
                 while let Some(u) = users_iter.next() {
-                    let mut row = Vec::with_capacity(3);
+                    let mut row = Vec::with_capacity(USERNAME_GROUP_WIDTH);
                     row.push(serde_json::json!({"text": u}));
+
                     let mut offset = 1;
                     while let Some(u) = users_iter.next() {
                         row.push(serde_json::json!({"text": u}));
                         offset += 1;
-                        if offset >= 3 { //&& is not allowed in `while let` so do this
+                        if offset >= USERNAME_GROUP_WIDTH { //&& is not allowed in `while let` so do this
                             break;
                         }
                     }
@@ -620,7 +631,7 @@ pub async fn handle_command<'a>(
                     .reply_with_markup(
                         msg.id,
                         msg.chat.id,
-                        format!("Please select a user to {}", stringify!($fun)),
+                        format!("Please select a user to {}", $action),
                         serde_json::json!({
                             "keyboard": buttons,
                             "one_time_keyboard": true,
@@ -634,7 +645,7 @@ pub async fn handle_command<'a>(
 
                 let key = format!("tg.replycommand.{}.{}", msg.chat.id, reply_message.id);
                 redis
-                    .set_with_expiry(&key, stringify!($fun), std::time::Duration::new(3600 * 24, 0))
+                    .set_with_expiry(&key, $action, std::time::Duration::new(3600 * 24, 0))
                     .await
                     .unwrap();
 
@@ -646,12 +657,24 @@ pub async fn handle_command<'a>(
     let res = match root {
         "/leaderboards" => leaderboards(msg.chat.id, context.clone(), redis_pool, db_pool).await,
         "/stickerlog" => stickerlog(msg, &split, context.clone(), redis_pool, db_pool).await,
-        "/quote" => with_user!(quote(_, msg.chat.id, context.clone(), db_pool, redis_pool)),
-        "/simulate" => with_user!(simulate(_, msg.chat.id, context.clone(), db_pool, redis_pool)),
+        "/quote" => {
+            with_user!(ACTION_QUOTE, quote(_, msg.chat.id, context.clone(), db_pool, redis_pool))
+        }
+        "/simulate" => {
+            with_user!(ACTION_SIMULATE, simulate(_, msg.chat.id, context.clone(), db_pool, redis_pool))
+        }
         "/simulatechat" => {
             simulate_chat(msg.chat.clone(), context.clone(), db_pool, redis_pool).await
         }
+        "/disaster" => {
+            use disaster::add_point;
+            with_user!(ACTION_ADD_DISASTER_POINT, add_point(_, &msg, context.clone(), db_pool, redis_pool))
+        }
+        "/disasterpoints" => {
+            disaster::show_points(msg.chat.id, context.clone(), db_pool, redis_pool).await
+        }
         _ => {
+            warn!("No command found for {}", root);
             if let ChatType::Private = msg.chat.kind {
                 //Only nag at the user for wrong command if in a private chat
                 context

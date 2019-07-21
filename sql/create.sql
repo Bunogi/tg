@@ -30,3 +30,10 @@ CREATE TABLE IF NOT EXISTS LastUserData (
   username TEXT,
   PRIMARY KEY(id, chatid)
 );
+
+CREATE TABLE IF NOT EXISTS DisasterStatus (
+  userid INTEGER,
+  chatid INTEGER,
+  points INTEGER,
+  PRIMARY KEY(chatid, userid)
+);

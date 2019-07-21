@@ -73,6 +73,10 @@ pub async fn get_user_id(chat_id: i64, name: &str, pool: SqlPool) -> Option<i64>
     .unwrap()
 }
 
+pub fn seconds_to_hours(seconds: i32) -> f64 {
+    f64::from(seconds) / (60.0 * 60.0)
+}
+
 pub unsafe fn rgba_to_cairo(mut ptr: *mut u8, len: usize) {
     assert_eq!(len % 4, 0);
     for _ in 0..len / 4 {

@@ -1,4 +1,4 @@
-use crate::commands::handle_command;
+use crate::commands::{self, handle_command};
 use crate::db::SqlPool;
 use crate::include_sql;
 use crate::redis::RedisPool;
@@ -105,10 +105,9 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
                 match redis.get_bytes(&key).await {
                     Ok(Some(command)) => {
                         match std::str::from_utf8(&command).unwrap().trim() {
-                            //These could possibly be condensed into a macro but I'm not convinced the amount of code
-                            //that would save would actually make it better. The serious indentation is pretty
-                            //annoying though
-                            "quote" => {
+                            //TODO: These could possibly be condensed into a macro for readability,
+                            //especially if some kind of enum type is used instead.
+                            commands::ACTION_QUOTE => {
                                 if let MessageData::Text(ref text) = **data {
                                     let userid =
                                         get_user_id(msg.chat.id, &text, db_pool.clone()).await;
@@ -129,7 +128,7 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
                                     }
                                 }
                             }
-                            "simulate" => {
+                            commands::ACTION_SIMULATE => {
                                 if let MessageData::Text(ref text) = **data {
                                     let userid =
                                         get_user_id(msg.chat.id, &text, db_pool.clone()).await;
@@ -146,6 +145,27 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
                                         .await
                                         .map_err(|e| {
                                             error!("failed to simulate from reply message: {:?}", e)
+                                        });
+                                    }
+                                }
+                            }
+                            commands::ACTION_ADD_DISASTER_POINT => {
+                                if let MessageData::Text(ref text) = **data {
+                                    let userid =
+                                        get_user_id(msg.chat.id, &text, db_pool.clone()).await;
+                                    if userid.is_none() {
+                                        return;
+                                    } else {
+                                        let _ = crate::commands::disaster::add_point(
+                                            userid.unwrap(),
+                                            &msg,
+                                            context.clone(),
+                                            db_pool.clone(),
+                                            redis_pool.clone(),
+                                        )
+                                        .await
+                                        .map_err(|e| {
+                                            error!("failed to add a disaster point from reply message: {:?}", e)
                                         });
                                     }
                                 }

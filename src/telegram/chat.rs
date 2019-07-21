@@ -52,9 +52,9 @@ impl fmt::Display for ChatType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ChatType::Private => write!(f, "private"),
-            ChatType::Group { title: _ } => write!(f, "group"),
-            ChatType::SuperGroup { title: _ } => write!(f, "supergroup"),
-            ChatType::Channel { title: _ } => write!(f, "channel"),
+            ChatType::Group { .. } => write!(f, "group"),
+            ChatType::SuperGroup { .. } => write!(f, "supergroup"),
+            ChatType::Channel { .. } => write!(f, "channel"),
         }
     }
 }

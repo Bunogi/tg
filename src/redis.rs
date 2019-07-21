@@ -16,8 +16,16 @@ pub struct RedisPool {
 impl RedisPool {
     pub async fn create(max_connections: usize) -> Result<Self> {
         let mut connections = Vec::new();
-        for _ in 0..max_connections {
-            let conn = Arc::new(Mutex::new(RedisConnection::connect().await?));
+        for i in 0..max_connections {
+            let mut conn = RedisConnection::connect().await?;
+            conn.run_command(
+                Command::new("CLIENT")
+                    .arg(b"SETNAME")
+                    .arg(&format!("Disastia-Telegram-Bot-{}", i).into_bytes()),
+            )
+            .await?;
+            let conn = Arc::new(Mutex::new(conn));
+
             connections.push(conn);
         }
         Ok(Self { connections })
@@ -49,8 +57,8 @@ quick_error! {
             from()
         }
         ConnectionFailed(err: io::Error) {}
-        UnexpectedResponse(got: String, expected: String) {
-            display("Unexpected Redis response \"{}\", expected {}", got, expected)
+        UnexpectedResponse(got: String) {
+            display("Unexpected Redis response \"{}\"", got)
         }
         RedisError(err: String) {
             display("Redis replied with error: {}", err)
@@ -72,6 +80,61 @@ async fn read_until(r: &mut TcpStream, byte: u8) -> io::Result<Vec<u8>> {
     }
 }
 
+pub struct Command {
+    commands: Vec<Vec<Vec<u8>>>,
+    amount: usize,
+}
+
+impl Command {
+    pub fn new(cmd: &str) -> Self {
+        let commands = vec![vec![cmd.to_string().into_bytes()]];
+        Self {
+            commands,
+            amount: 1,
+        }
+    }
+
+    pub fn arg(mut self, bytes: &[u8]) -> Self {
+        self.commands.last_mut().unwrap().push(bytes.to_vec());
+        self
+    }
+
+    pub fn command(mut self, cmd: &str) -> Self {
+        self.commands.push(vec![cmd.to_string().into_bytes()]);
+        self.amount += 1;
+        self
+    }
+
+    //Convert to redis protocol encoding
+    fn serialize(self) -> Vec<u8> {
+        let mut out = Vec::new();
+        for command in self.commands {
+            let mut this_command = format!("*{}\r\n", command.len()).into_bytes();
+            for arg in command {
+                let mut serialized = format!("${}\r\n", arg.len()).into_bytes();
+                for byte in arg {
+                    serialized.push(byte);
+                }
+                serialized.push(b'\r');
+                serialized.push(b'\n');
+
+                this_command.append(&mut serialized);
+            }
+            out.append(&mut this_command);
+        }
+
+        out
+    }
+}
+
+#[derive(Debug)]
+pub enum Value {
+    Array(Vec<Value>),
+    Integer(isize),
+    Nil,
+    String(Vec<u8>),
+}
+
 impl RedisConnection {
     pub async fn connect() -> Result<Self> {
         let address = "127.0.0.1:6379";
@@ -88,6 +151,94 @@ impl RedisConnection {
                 .await
                 .map_err(Error::ConnectionFailed)?,
         )))
+    }
+
+    async fn parse_simple_value(buf: &[u8]) -> Result<Value> {
+        match buf[0] {
+            b'+' => Ok(Value::String(buf[1..].into())),
+            b'-' => {
+                //TODO: find a way to do this without copying
+                Err(Error::RedisError(
+                    String::from_utf8_lossy(&buf[1..]).to_string(),
+                ))
+            }
+            b':' => {
+                //TODO: find a way to do this without copying
+                let string = String::from_utf8_lossy(&buf[1..]);
+                let num = string.trim().parse::<isize>().unwrap();
+                Ok(Value::Integer(num))
+            }
+            _ => Err(Error::UnexpectedResponse(
+                String::from_utf8_lossy(buf).to_string(),
+            )),
+        }
+    }
+
+    async fn parse_string(start: &[u8], stream: &mut TcpStream) -> Result<Value> {
+        if start == b"$-1\r\n" {
+            Ok(Value::Nil)
+        } else {
+            let num = String::from_utf8_lossy(&start[1..])
+                .trim()
+                .parse::<usize>()
+                .unwrap();
+            let mut buf = vec![0u8; num + 2]; // add two to catch the final \r\n from redis
+            stream.read_exact(&mut buf).await?;
+            //TODO: this probably doesn't need to copy either..
+            Ok(Value::String(buf[..num].to_vec()))
+        }
+    }
+
+    //Assumes that there will never be nested arrays in a redis response.
+    async fn parse_array(start: &[u8], mut stream: &mut TcpStream) -> Result<Value> {
+        let num = String::from_utf8_lossy(&start[1..])
+            .trim()
+            .parse::<usize>()
+            .unwrap();
+
+        let mut values = Vec::with_capacity(num);
+
+        for _ in 0..num {
+            let buf = read_until(&mut stream, b'\n').await?;
+            match buf[0] {
+                b'+' | b'-' | b':' => values.push(Self::parse_simple_value(&buf).await?),
+                b'$' => values.push(Self::parse_string(&buf, &mut stream).await?),
+                _ => {
+                    return Err(Error::UnexpectedResponse(
+                        String::from_utf8_lossy(&buf).to_string(),
+                    ))
+                }
+            }
+        }
+
+        Ok(Value::Array(values))
+    }
+
+    //Read one value from the stream using the parse_* utility functions
+    async fn read_value(mut stream: &mut TcpStream) -> Result<Value> {
+        let buf = read_until(&mut stream, b'\n').await?;
+        match buf[0] {
+            b'+' | b'-' | b':' => Self::parse_simple_value(&buf).await,
+            b'$' => Self::parse_string(&buf, &mut stream).await,
+            b'*' => Self::parse_array(&buf, &mut stream).await,
+            _ => Err(Error::UnexpectedResponse(
+                String::from_utf8_lossy(&buf).to_string(),
+            )),
+        }
+    }
+
+    pub async fn run_command(&mut self, command: Command) -> Result<Vec<Value>> {
+        let mut stream = self.stream.lock().await;
+        let number_of_commands = command.amount;
+        let serialized = command.serialize();
+        stream.write_all(&serialized).await?;
+
+        let mut results = Vec::with_capacity(number_of_commands);
+        for _ in 0..number_of_commands {
+            results.push(Self::read_value(&mut stream).await?);
+        }
+
+        Ok(results)
     }
 
     pub async fn set<'a, D>(&'a mut self, key: &'a str, data: D) -> Result<()>
@@ -118,10 +269,10 @@ impl RedisConnection {
 
         let buf = read_until(&mut stream, b'\n').await?;
         if buf != b"+OK\r\n" {
-            Err(Error::UnexpectedResponse(
-                "+OK\r\n".into(),
-                format!("{}", String::from_utf8_lossy(&buf)),
-            ))
+            Err(Error::UnexpectedResponse(format!(
+                "{}",
+                String::from_utf8_lossy(&buf)
+            )))
         } else {
             Ok(())
         }
@@ -167,27 +318,14 @@ impl RedisConnection {
 
         let buf = read_until(&mut stream, b'\n').await?;
         if buf != b"+OK\r\n" {
-            Err(Error::UnexpectedResponse(
-                "+OK\r\n".into(),
-                format!("{}", String::from_utf8_lossy(&buf)),
-            ))
+            Err(Error::UnexpectedResponse(format!(
+                "{}",
+                String::from_utf8_lossy(&buf)
+            )))
         } else {
             Ok(())
         }
     }
-
-    // pub async fn get<'a, D>(&'a mut self, key: &'a str) -> Result<Option<D>>
-    // where
-    //     D: DeserializeOwned,
-    // {
-    //     let buf = self.get_bytes(key).await?;
-    //     if let Some(buf) = buf {
-    //         let deserialized = serde_json::from_slice(&buf).unwrap();
-    //         Ok(Some(deserialized))
-    //     } else {
-    //         Ok(None)
-    //     }
-    // }
 
     pub async fn get_bytes<'a>(&'a mut self, key: &'a str) -> Result<Option<Vec<u8>>> {
         let mut stream = self.stream.lock().await;
@@ -221,7 +359,6 @@ impl RedisConnection {
             _ => {
                 return Err(Error::UnexpectedResponse(
                     String::from_utf8_lossy(&buf).into(),
-                    "Non-error reply".into(),
                 ))
             }
         }
