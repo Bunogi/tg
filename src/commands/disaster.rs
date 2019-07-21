@@ -191,7 +191,7 @@ pub async fn show_points(
 
                 let utc =
                     DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(entry.utc, 0), Utc);
-                let time_string = utc.with_timezone(&Local).format("%k:%M %e %B %:z");
+                let time_string = utc.with_timezone(&Local).format("%e %B %k:%M %:z");
 
                 let appendage = format!("[{}] {} -> {}\n", time_string, giver, sender);
                 output += &appendage;
