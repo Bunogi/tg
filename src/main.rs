@@ -46,7 +46,7 @@ async fn main() -> std::io::Result<()> {
     loop {
         telegram
             .updates()
-            .for_each(|f| {
+            .for_each_concurrent(None, |f| {
                 runtime::spawn(handlers::handle_update(
                     telegram.clone(),
                     f,
