@@ -1,6 +1,5 @@
 use crate::db::SqlPool;
 use crate::include_sql;
-use crate::redis::RedisPool;
 use crate::telegram::{
     chat::{Chat, ChatType},
     message::Message,
@@ -32,7 +31,7 @@ fn get_command<'a>(input: &'a str, botname: &str) -> Option<&'a str> {
 async fn leaderboards<'a>(
     chatid: i64,
     context: Telegram,
-    redis_pool: RedisPool,
+    redis_pool: redis_async::Pool,
     db: SqlPool,
 ) -> Result<(), String> {
     let conn = db.get().await;
@@ -132,7 +131,7 @@ pub async fn stickerlog<'a>(
     msg: &'a Message,
     args: &'a [String],
     context: Telegram,
-    redis_pool: RedisPool,
+    redis_pool: redis_async::Pool,
     db: SqlPool,
 ) -> Result<(), String> {
     let (caption, images, usages) = {
@@ -210,7 +209,7 @@ pub async fn stickerlog<'a>(
         let mut images = Vec::new();
         for f in file_ids {
             let key = format!("tg.download.{}", f);
-            match redis.get_bytes(&key).await {
+            match redis.get(&key).await {
                 Ok(Some(v)) => images.push(v),
                 Ok(None) => {
                     debug!("File {} not saved in redis, downloading from Telegram", f);
@@ -220,7 +219,7 @@ pub async fn stickerlog<'a>(
                         .map_err(|e| format!("downloading file {}: {:?}", f, e))?;
                     images.push(
                         redis
-                            .get_bytes(&file_key)
+                            .get(&file_key)
                             .await
                             .map_err(|e| format!("getting image from Redis: {}: {:?}", f, e))?
                             .unwrap(),
@@ -370,14 +369,14 @@ async fn simulate_chat(
     chat: Chat,
     context: Telegram,
     db_pool: SqlPool,
-    redis_pool: RedisPool,
+    redis_pool: redis_async::Pool,
 ) -> Result<(), String> {
     let key = format!("tg.markovchain.chat.{}", chat.id);
     let mut redis = redis_pool.get().await;
-    let chain = match redis.get_bytes(&key).await {
-        Ok(Some(s)) => {
+    let chain = match redis.get(&key).await {
+        Ok(Some(ref s)) => {
             //A cached version exists, use that
-            let value: Chain<String> = rmp_serde::from_slice(&s)
+            let value: Chain<String> = rmp_serde::from_slice(s)
                 .map_err(|e| format!("deserializing markov chain at {}: {}", key, e))?;
             Ok(value)
         }
@@ -442,11 +441,11 @@ pub async fn simulate(
     chatid: i64,
     context: Telegram,
     db_pool: SqlPool,
-    redis_pool: RedisPool,
+    redis_pool: redis_async::Pool,
 ) -> Result<(), String> {
     let key = format!("tg.markovchain.{}.{}", chatid, userid);
     let mut redis = redis_pool.get().await;
-    let chain = match redis.get_bytes(&key).await {
+    let chain = match redis.get(&key).await {
         Ok(Some(s)) => {
             //A cached version exists, use that
             let value: Chain<String> = rmp_serde::from_slice(&s)
@@ -493,7 +492,7 @@ pub async fn simulate(
             //Cache for later
             let serialized = rmp_serde::to_vec(&chain).unwrap();
             redis
-                .set_with_expiry(&key, serialized, std::time::Duration::new(3600 * 24, 0))
+                .set_with_expiry(&key, &serialized, std::time::Duration::new(3600 * 24, 0))
                 .await
                 .unwrap();
             Ok(chain)
@@ -522,7 +521,7 @@ pub async fn quote(
     chatid: i64,
     context: Telegram,
     db_pool: SqlPool,
-    redis_pool: RedisPool,
+    redis_pool: redis_async::Pool,
 ) -> Result<(), String> {
     let (message, timestamp): (String, isize) = db_pool
         .get()
@@ -563,7 +562,7 @@ pub async fn handle_command<'a>(
     msg: &'a Message,
     msg_text: &'a str,
     context: Telegram,
-    redis_pool: RedisPool,
+    redis_pool: redis_async::Pool,
     db_pool: SqlPool,
 ) {
     let split: Vec<String> = msg_text.split_whitespace().map(|s| s.into()).collect();

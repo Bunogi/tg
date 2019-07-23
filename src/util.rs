@@ -1,6 +1,5 @@
 use crate::db::SqlPool;
 use crate::include_sql;
-use crate::redis::RedisConnection;
 use crate::telegram::{user::User, Telegram};
 use chrono::Duration;
 use rusqlite::OptionalExtension;
@@ -10,10 +9,10 @@ pub async fn get_user(
     chat_id: i64,
     user_id: i64,
     context: Telegram,
-    mut redis: RedisConnection,
+    mut redis: redis_async::Connection,
 ) -> User {
     let user_path = format!("tg.user.{}.{}", chat_id, user_id);
-    match redis.get_bytes(&user_path).await.unwrap() {
+    match redis.get(&user_path).await.unwrap() {
         Some(u) => rmp_serde::from_slice(&u).unwrap(),
         None => {
             debug!("Getting user from tg");

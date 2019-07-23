@@ -1,10 +1,10 @@
-use crate::redis;
 use crate::{
     db::SqlPool,
     include_sql,
     telegram::{message::Message, Telegram},
 };
 use chrono::prelude::*;
+use redis_async::{Command, CommandList, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -19,7 +19,7 @@ pub async fn add_point(
     message: &Message,
     context: Telegram,
     sql_pool: SqlPool,
-    redis_pool: redis::RedisPool,
+    redis_pool: redis_async::Pool,
 ) -> Result<(), String> {
     if message.from.id as i64 == userid {
         return context
@@ -39,23 +39,18 @@ pub async fn add_point(
         message.chat.id, message.from.id
     );
     let status = redis
-        .get_bytes(&cooldown_key)
+        .get(&cooldown_key)
         .await
         .map_err(|e| format!("getting cooldown status: {:?}", e))?;
 
     //They are on cooldown
     if status.is_some() {
-        let ttl_command = redis::Command::new("TTL").arg(cooldown_key.as_bytes());
-        let res = redis
+        let ttl_command = Command::new("TTL").arg(cooldown_key.as_bytes());
+        let ttl = redis
             .run_command(ttl_command)
             .await
-            .map_err(|e| format!("getting cooldown left: {:?}", e))?;
-
-        let ttl: i64 = if let redis::Value::Integer(i) = res[0] {
-            i as i64
-        } else {
-            panic!("invalid type from ttl command")
-        };
+            .map_err(|e| format!("getting cooldown left: {:?}", e))?
+            .unwrap_integer();
 
         return context
             .send_message_silent(
@@ -79,7 +74,7 @@ pub async fn add_point(
 
     //Update last disaster points given list in redis and set cooldown using a pipeline
     let last_disaster_key = format!("tg.lastdisasterpoints.{}", message.chat.id).into_bytes();
-    let command = redis::Command::new("LPUSH")
+    let command = CommandList::new("LPUSH")
         .arg(&last_disaster_key)
         .arg(
             &rmp_serde::to_vec(&LastDisaster {
@@ -100,7 +95,7 @@ pub async fn add_point(
         .arg((3 * 60 * 60).to_string().as_bytes()); // 3 hour cooldown
 
     redis
-        .run_command(command)
+        .run_commands(command)
         .await
         .map_err(|e| format!("adding redis disaster data: {:?}", e))?;
 
@@ -133,7 +128,7 @@ pub async fn show_points(
     chatid: i64,
     context: Telegram,
     sql_pool: SqlPool,
-    redis_pool: redis::RedisPool,
+    redis_pool: redis_async::Pool,
 ) -> Result<(), String> {
     let conn = sql_pool.get().await;
     let points = conn
@@ -169,38 +164,34 @@ pub async fn show_points(
     let last_disaster_key = format!("tg.lastdisasterpoints.{}", chatid).into_bytes();
     let given_points = redis
         .run_command(
-            redis::Command::new("LRANGE")
+            Command::new("LRANGE")
                 .arg(&last_disaster_key)
                 .arg(b"0")
                 .arg(b"9"),
         )
         .await
-        .map_err(|e| format!("getting last disaster points given: {:?}", e))?;
+        .map_err(|e| format!("getting last disaster points given: {:?}", e))?
+        .unwrap_array();
 
     output += "Last sent points:\n";
 
     //Format these entries nicely
-    if let redis::Value::Array(ref a) = &given_points[0] {
-        for value in a {
-            if let redis::Value::String(v) = value {
-                let entry: LastDisaster = rmp_serde::from_slice(&v).unwrap();
-                let giver =
-                    crate::util::get_user(chatid, entry.from, context.clone(), redis.clone()).await;
-                let sender =
-                    crate::util::get_user(chatid, entry.to, context.clone(), redis.clone()).await;
+    for value in given_points {
+        if let Value::String(v) = value {
+            let entry: LastDisaster = rmp_serde::from_slice(&v).unwrap();
+            let giver =
+                crate::util::get_user(chatid, entry.from, context.clone(), redis.clone()).await;
+            let sender =
+                crate::util::get_user(chatid, entry.to, context.clone(), redis.clone()).await;
 
-                let utc =
-                    DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(entry.utc, 0), Utc);
-                let time_string = utc.with_timezone(&Local).format("%e %B %k:%M %:z");
+            let utc = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(entry.utc, 0), Utc);
+            let time_string = utc.with_timezone(&Local).format("%e %B %k:%M %:z");
 
-                let appendage = format!("[{}] {} -> {}\n", time_string, giver, sender);
-                output += &appendage;
-            } else {
-                panic!("received invalid datatype from redis")
-            }
+            let appendage = format!("[{}] {} -> {}\n", time_string, giver, sender);
+            output += &appendage;
+        } else {
+            panic!("received invalid datatype from redis")
         }
-    } else {
-        panic!("received invalid datatype from redis")
     }
 
     context

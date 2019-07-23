@@ -13,17 +13,18 @@ use std::process::exit;
 mod commands;
 mod db;
 mod handlers;
-mod redis;
 mod telegram;
 mod util;
 
 #[runtime::main(runtime_tokio::Tokio)]
 async fn main() -> std::io::Result<()> {
-    //maximum number of connections to redis and the database
-    const MAX_CONNECTIONS: usize = 4;
     env_logger::init();
+    //maximum number of connections to redis and the database
+    let max_connections = num_cpus::get();
+    info!("Using {} pooled connections", max_connections);
     info!("Opening redis connections...");
-    let redis_pool = match redis::RedisPool::create(MAX_CONNECTIONS).await {
+    let redis_pool = match redis_async::Pool::create("127.0.0.1:6379".into(), max_connections).await
+    {
         Ok(c) => c,
         Err(e) => {
             error!("Failed to connect to redis: {}", e);
@@ -31,7 +32,7 @@ async fn main() -> std::io::Result<()> {
         }
     };
     info!("Opening database connections...");
-    let db_pool = SqlPool::new(MAX_CONNECTIONS, "logs.db").unwrap();
+    let db_pool = SqlPool::new(max_connections, "logs.db").unwrap();
 
     {
         info!("Creating tables if necesarry...");

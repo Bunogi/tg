@@ -1,7 +1,6 @@
 use crate::commands::{self, handle_command};
 use crate::db::SqlPool;
 use crate::include_sql;
-use crate::redis::RedisPool;
 use crate::telegram::{
     chat::ChatType,
     message::{Message, MessageData},
@@ -13,7 +12,7 @@ use crate::util::get_user_id;
 pub async fn handle_update(
     context: Telegram,
     update: Update,
-    redis_pool: RedisPool,
+    redis_pool: redis_async::Pool,
     db_pool: SqlPool,
 ) {
     use Update::*;
@@ -73,7 +72,12 @@ async fn log_message(msg: &Message, db_pool: SqlPool) {
     }
 }
 
-async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool, db_pool: SqlPool) {
+async fn handle_message(
+    msg: &Message,
+    context: Telegram,
+    redis_pool: redis_async::Pool,
+    db_pool: SqlPool,
+) {
     //Never log private chats
     let mut should_log = if let ChatType::Private = msg.chat.kind {
         false
@@ -102,7 +106,7 @@ async fn handle_message(msg: &Message, context: Telegram, redis_pool: RedisPool,
                 //Check and handle commands that support replying
                 let mut redis = redis_pool.get().await;
                 let key = format!("tg.replycommand.{}.{}", msg.chat.id, other_message.id);
-                match redis.get_bytes(&key).await {
+                match redis.get(&key).await {
                     Ok(Some(command)) => {
                         match std::str::from_utf8(&command).unwrap().trim() {
                             //TODO: These could possibly be condensed into a macro for readability,

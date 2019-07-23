@@ -3,7 +3,6 @@ pub mod message;
 pub mod update;
 pub mod user;
 
-use crate::redis::RedisConnection;
 use futures::compat::*;
 use futures::prelude::*;
 use futures01::{future::Future as Future01, stream::Stream};
@@ -199,7 +198,7 @@ impl Telegram {
     //Returns redis path of the downloaded file
     pub async fn download_file<'a>(
         &'a self,
-        mut redis: RedisConnection,
+        mut redis: redis_async::Connection,
         file_id: &'a str,
     ) -> Result<String, ()> {
         #[derive(Deserialize)]
