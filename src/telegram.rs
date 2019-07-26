@@ -198,7 +198,7 @@ impl Telegram {
     //Returns redis path of the downloaded file
     pub async fn download_file<'a>(
         &'a self,
-        mut redis: redis_async::Connection,
+        mut redis: darkredis::Connection,
         file_id: &'a str,
     ) -> Result<String, ()> {
         #[derive(Deserialize)]

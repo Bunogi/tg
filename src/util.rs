@@ -9,7 +9,7 @@ pub async fn get_user(
     chat_id: i64,
     user_id: i64,
     context: Telegram,
-    mut redis: redis_async::Connection,
+    mut redis: darkredis::Connection,
 ) -> User {
     let user_path = format!("tg.user.{}.{}", chat_id, user_id);
     match redis.get(&user_path).await.unwrap() {

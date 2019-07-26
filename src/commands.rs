@@ -10,6 +10,7 @@ use cairo::Format;
 use chrono::{prelude::*, NaiveDateTime, Utc};
 use libc::c_int;
 use markov::Chain;
+use serde::{Deserialize, Serialize};
 
 const TIME_FORMAT: &str = "%A, %e %B %Y %H:%M:%S %Z";
 
@@ -31,7 +32,7 @@ fn get_command<'a>(input: &'a str, botname: &str) -> Option<&'a str> {
 async fn leaderboards<'a>(
     chatid: i64,
     context: Telegram,
-    redis_pool: redis_async::Pool,
+    redis_pool: darkredis::ConnectionPool,
     db: SqlPool,
 ) -> Result<(), String> {
     let conn = db.get().await;
@@ -131,7 +132,7 @@ pub async fn stickerlog<'a>(
     msg: &'a Message,
     args: &'a [String],
     context: Telegram,
-    redis_pool: redis_async::Pool,
+    redis_pool: darkredis::ConnectionPool,
     db: SqlPool,
 ) -> Result<(), String> {
     let (caption, images, usages) = {
@@ -369,7 +370,7 @@ async fn simulate_chat(
     chat: Chat,
     context: Telegram,
     db_pool: SqlPool,
-    redis_pool: redis_async::Pool,
+    redis_pool: darkredis::ConnectionPool,
 ) -> Result<(), String> {
     let key = format!("tg.markovchain.chat.{}", chat.id);
     let mut redis = redis_pool.get().await;
@@ -441,7 +442,7 @@ pub async fn simulate(
     chatid: i64,
     context: Telegram,
     db_pool: SqlPool,
-    redis_pool: redis_async::Pool,
+    redis_pool: darkredis::ConnectionPool,
 ) -> Result<(), String> {
     let key = format!("tg.markovchain.{}.{}", chatid, userid);
     let mut redis = redis_pool.get().await;
@@ -521,7 +522,7 @@ pub async fn quote(
     chatid: i64,
     context: Telegram,
     db_pool: SqlPool,
-    redis_pool: redis_async::Pool,
+    redis_pool: darkredis::ConnectionPool,
 ) -> Result<(), String> {
     let (message, timestamp): (String, isize) = db_pool
         .get()
@@ -558,11 +559,16 @@ pub const ACTION_SIMULATE: &str = "simulate";
 pub const ACTION_QUOTE: &str = "quote";
 pub const ACTION_ADD_DISASTER_POINT: &str = "give a disaster point";
 
+pub struct ReplyCommand<'a> {
+    action: &'a str,
+    userid: i64,
+}
+
 pub async fn handle_command<'a>(
     msg: &'a Message,
     msg_text: &'a str,
     context: Telegram,
-    redis_pool: redis_async::Pool,
+    redis_pool: darkredis::ConnectionPool,
     db_pool: SqlPool,
 ) {
     let split: Vec<String> = msg_text.split_whitespace().map(|s| s.into()).collect();
@@ -633,12 +639,11 @@ pub async fn handle_command<'a>(
                         format!("Please select a user to {}", $action),
                         serde_json::json!({
                             "keyboard": buttons,
-                            "one_time_keyboard": true,
                             "selective": true,
                         })
                     )
                     .await
-                    .map_err(|e| format!("sending error message: {:?}", e)).unwrap();
+                    .map_err(|e| format!("sending select user message: {:?}", e)).unwrap();
 
                 let mut redis = redis_pool.get().await;
 

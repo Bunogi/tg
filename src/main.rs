@@ -23,7 +23,7 @@ async fn main() -> std::io::Result<()> {
     let max_connections = num_cpus::get();
     info!("Using {} pooled connections", max_connections);
     info!("Opening redis connections...");
-    let redis_pool = match redis_async::Pool::create("127.0.0.1:6379".into(), max_connections).await
+    let redis_pool = match darkredis::ConnectionPool::create("127.0.0.1:6379".into(), max_connections).await
     {
         Ok(c) => c,
         Err(e) => {

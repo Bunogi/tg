@@ -12,7 +12,7 @@ use crate::util::get_user_id;
 pub async fn handle_update(
     context: Telegram,
     update: Update,
-    redis_pool: redis_async::Pool,
+    redis_pool: darkredis::ConnectionPool,
     db_pool: SqlPool,
 ) {
     use Update::*;
@@ -75,7 +75,7 @@ async fn log_message(msg: &Message, db_pool: SqlPool) {
 async fn handle_message(
     msg: &Message,
     context: Telegram,
-    redis_pool: redis_async::Pool,
+    redis_pool: darkredis::ConnectionPool,
     db_pool: SqlPool,
 ) {
     //Never log private chats

@@ -4,7 +4,7 @@ use crate::{
     telegram::{message::Message, Telegram},
 };
 use chrono::prelude::*;
-use redis_async::{Command, CommandList, Value};
+use darkredis::{Command, CommandList, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -19,7 +19,7 @@ pub async fn add_point(
     message: &Message,
     context: Telegram,
     sql_pool: SqlPool,
-    redis_pool: redis_async::Pool,
+    redis_pool: darkredis::ConnectionPool,
 ) -> Result<(), String> {
     if message.from.id as i64 == userid {
         return context
@@ -128,7 +128,7 @@ pub async fn show_points(
     chatid: i64,
     context: Telegram,
     sql_pool: SqlPool,
-    redis_pool: redis_async::Pool,
+    redis_pool: darkredis::ConnectionPool,
 ) -> Result<(), String> {
     let conn = sql_pool.get().await;
     let points = conn
