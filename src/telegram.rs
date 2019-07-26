@@ -177,6 +177,25 @@ impl Telegram {
         self.send_message_raw(json).await
     }
 
+    pub async fn reply_and_close_keyboard(
+        &self,
+        msg_id: u64,
+        chat_id: i64,
+        text: String,
+    ) -> Result<Message, ()> {
+        let json = serde_json::json!({
+            "reply_to_message_id": msg_id,
+            "chat_id": chat_id,
+            "text": text,
+            "disable_notification": true,
+            "reply_markup": {
+                "remove_keyboard": true,
+                "selective": true
+            }
+        });
+        self.send_message_raw(json).await
+    }
+
     pub async fn send_message_silent(&self, chat_id: i64, text: String) -> Result<Message, ()> {
         let json = serde_json::json!({
             "chat_id": chat_id,

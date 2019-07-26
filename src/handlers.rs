@@ -121,6 +121,7 @@ async fn handle_message(
                                         let _ = crate::commands::quote(
                                             userid.unwrap(),
                                             msg.chat.id,
+                                            msg.id,
                                             context.clone(),
                                             db_pool.clone(),
                                             redis_pool.clone(),
@@ -142,6 +143,7 @@ async fn handle_message(
                                         let _ = crate::commands::simulate(
                                             userid.unwrap(),
                                             msg.chat.id,
+                                            msg.id,
                                             context.clone(),
                                             db_pool.clone(),
                                             redis_pool.clone(),

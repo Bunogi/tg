@@ -10,7 +10,6 @@ use cairo::Format;
 use chrono::{prelude::*, NaiveDateTime, Utc};
 use libc::c_int;
 use markov::Chain;
-use serde::{Deserialize, Serialize};
 
 const TIME_FORMAT: &str = "%A, %e %B %Y %H:%M:%S %Z";
 
@@ -440,6 +439,7 @@ async fn simulate_chat(
 pub async fn simulate(
     userid: i64,
     chatid: i64,
+    command_message_id: u64,
     context: Telegram,
     db_pool: SqlPool,
     redis_pool: darkredis::ConnectionPool,
@@ -474,7 +474,7 @@ pub async fn simulate(
 
             if messages.is_empty() {
                 return context
-                    .send_message_silent(chatid, "Error: No logged messages in this chat".into())
+                    .reply_and_close_keyboard(command_message_id, chatid, "Error: No logged messages in this chat".into())
                     .await
                     .map(|_| ())
                     .map_err(|e| format!("sending no messages exist message: {:?}", e));
@@ -511,7 +511,7 @@ pub async fn simulate(
     output.truncate(4000);
 
     context
-        .send_message_silent(chatid, output)
+        .reply_and_close_keyboard(command_message_id, chatid, output)
         .await
         .map(|_| ())
         .map_err(|e| format!("sending simulated string: {:?}", e))
@@ -520,6 +520,7 @@ pub async fn simulate(
 pub async fn quote(
     userid: i64,
     chatid: i64,
+    command_message_id: u64,
     context: Telegram,
     db_pool: SqlPool,
     redis_pool: darkredis::ConnectionPool,
@@ -539,7 +540,8 @@ pub async fn quote(
     let redis = redis_pool.get().await;
 
     context
-        .send_message_silent(
+        .reply_and_close_keyboard(
+            command_message_id,
             chatid,
             format!(
                 "\"{}\" -- {}, {}",
@@ -558,11 +560,6 @@ pub async fn quote(
 pub const ACTION_SIMULATE: &str = "simulate";
 pub const ACTION_QUOTE: &str = "quote";
 pub const ACTION_ADD_DISASTER_POINT: &str = "give a disaster point";
-
-pub struct ReplyCommand<'a> {
-    action: &'a str,
-    userid: i64,
-}
 
 pub async fn handle_command<'a>(
     msg: &'a Message,
@@ -662,10 +659,10 @@ pub async fn handle_command<'a>(
         "/leaderboards" => leaderboards(msg.chat.id, context.clone(), redis_pool, db_pool).await,
         "/stickerlog" => stickerlog(msg, &split, context.clone(), redis_pool, db_pool).await,
         "/quote" => {
-            with_user!(ACTION_QUOTE, quote(_, msg.chat.id, context.clone(), db_pool, redis_pool))
+            with_user!(ACTION_QUOTE, quote(_, msg.chat.id, msg.id, context.clone(), db_pool, redis_pool))
         }
         "/simulate" => {
-            with_user!(ACTION_SIMULATE, simulate(_, msg.chat.id, context.clone(), db_pool, redis_pool))
+            with_user!(ACTION_SIMULATE, simulate(_, msg.chat.id, msg.id, context.clone(), db_pool, redis_pool))
         }
         "/simulatechat" => {
             simulate_chat(msg.chat.clone(), context.clone(), db_pool, redis_pool).await

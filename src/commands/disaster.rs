@@ -53,7 +53,8 @@ pub async fn add_point(
             .unwrap_integer();
 
         return context
-            .send_message_silent(
+            .reply_and_close_keyboard(
+                message.id,
                 message.chat.id,
                 format!(
                     "You can give a new disaster point in {:0.1} hours",
@@ -109,7 +110,8 @@ pub async fn add_point(
         .map_err(|e| format!("getting user points: {:?}", e))?;
 
     context
-        .send_message_silent(
+        .reply_and_close_keyboard(
+            message.id,
             message.chat.id,
             format!(
                 "{} now has {} disaster points.",
