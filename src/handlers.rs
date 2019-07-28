@@ -29,7 +29,7 @@ pub async fn handle_update(
             .unwrap();
             info!(
                 "[{}] user {} edited message {}",
-                msg.chat.kind, msg.from, msg.id,
+                msg.chat, msg.from, msg.id,
             )
         }
         _ => warn!("Update event {:?} not handled!", update),
