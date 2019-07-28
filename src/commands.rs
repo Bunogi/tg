@@ -559,7 +559,7 @@ pub async fn quote(
         .map_err(|e| format!("sending qoute: {:?}", e))
 }
 
-async fn wordcount(
+async fn wordcount_graph(
     command_message: &Message,
     context: Telegram,
     db_pool: SqlPool,
@@ -652,6 +652,31 @@ async fn wordcount(
             .map(|_| ())
             .map_err(|_| "sending rendered image".to_string())
     }
+}
+
+async fn wordcount(
+    word: &str,
+    chat: &Chat,
+    context: Telegram,
+    db_pool: SqlPool,
+) -> Result<(), String> {
+    let conn = db_pool.get().await;
+    let usages: isize = conn
+        .query_row(
+            include_sql!("getwordusage.sql"),
+            params![word, chat.id],
+            |row| row.get(1),
+        )
+        .unwrap();
+
+    context
+        .send_message_silent(
+            chat.id,
+            format!("I have seen the word '{}' {} time(s).", word, usages),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("sending word count message: {:?}", e))
 }
 
 //Action constants used in the get_user macro for commands which can take a reply.
@@ -766,7 +791,15 @@ pub async fn handle_command<'a>(
         "/simulatechat" => {
             simulate_chat(msg.chat.clone(), context.clone(), db_pool, redis_pool).await
         }
-        "/wordcount" => wordcount(&msg, context.clone(), db_pool).await,
+        "/wordcount" => match split.len() {
+            1 => wordcount_graph(&msg, context.clone(), db_pool).await,
+            2 => wordcount(&split[1], &msg.chat, context.clone(), db_pool).await,
+            _ => context
+                .send_message_silent(msg.chat.id, "Invalid number of arguments".to_string())
+                .await
+                .map(|_| ())
+                .map_err(|e| format!("sending invalid argument message: {:?}", e)),
+        },
         "/disaster" => {
             use disaster::add_point;
             with_user!(ACTION_ADD_DISASTER_POINT, add_point(_, &msg, context.clone(), db_pool, redis_pool))
