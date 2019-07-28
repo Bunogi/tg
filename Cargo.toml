@@ -28,8 +28,3 @@ serde_json = "1.0.39"
 [dependencies.rusqlite]
 version = "0.19.0"
 features = ["bundled"]
-
-[dependencies.image]
-version = "0.22.0"
-features = ["png_codec", "jpeg"]
-default-features = false

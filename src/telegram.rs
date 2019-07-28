@@ -279,7 +279,6 @@ impl Telegram {
         Ok(key)
     }
 
-    //TODO take slice instead when multiple lifetimes in async fns are a thing
     pub async fn send_photo<'a>(
         &'a self,
         chat_id: i64,
@@ -328,27 +327,6 @@ impl Telegram {
         caption: Option<String>,
         silent: bool,
     ) -> Result<Message, ()> {
-        //Telegram expects a thumbnail size of this or smaller
-        const TELEGRAM_THUMBNAIL_SIZE: u32 = 320;
-        //Create the thumbnail
-        let image = image::load_from_memory_with_format(&data, image::ImageFormat::PNG).unwrap();
-        let image = image::imageops::resize(
-            &image,
-            TELEGRAM_THUMBNAIL_SIZE,
-            TELEGRAM_THUMBNAIL_SIZE,
-            image::FilterType::Nearest,
-        );
-        let mut thumbnail_buffer = Vec::new();
-        let mut decoder = image::jpeg::JPEGEncoder::new(&mut thumbnail_buffer);
-        decoder
-            .encode(
-                &image,
-                TELEGRAM_THUMBNAIL_SIZE,
-                TELEGRAM_THUMBNAIL_SIZE,
-                image::ColorType::RGB(8),
-            )
-            .unwrap();
-
         let url = self.get_url("sendDocument");
         let form = multipart::Form::new()
             .part(
@@ -356,10 +334,6 @@ impl Telegram {
                 multipart::Part::bytes(data).file_name("image.png"),
             )
             .part("chat_id", multipart::Part::text(chat_id.to_string()))
-            .part(
-                "thumb",
-                multipart::Part::bytes(thumbnail_buffer).file_name("thumbnail.jpg"),
-            )
             .part(
                 "disable_notification",
                 multipart::Part::text(silent.to_string()),
