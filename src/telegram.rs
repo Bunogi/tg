@@ -320,6 +320,75 @@ impl Telegram {
             .await
     }
 
+    //Send a message in png format, panics if data is not a valid PNG image
+    pub async fn send_png_lossless(
+        &self,
+        chat_id: i64,
+        data: Vec<u8>,
+        caption: Option<String>,
+        silent: bool,
+    ) -> Result<Message, ()> {
+        //Telegram expects a thumbnail size of this or smaller
+        const TELEGRAM_THUMBNAIL_SIZE: u32 = 320;
+        //Create the thumbnail
+        let image = image::load_from_memory_with_format(&data, image::ImageFormat::PNG).unwrap();
+        let image = image::imageops::resize(
+            &image,
+            TELEGRAM_THUMBNAIL_SIZE,
+            TELEGRAM_THUMBNAIL_SIZE,
+            image::FilterType::Nearest,
+        );
+        let mut thumbnail_buffer = Vec::new();
+        let mut decoder = image::jpeg::JPEGEncoder::new(&mut thumbnail_buffer);
+        decoder
+            .encode(
+                &image,
+                TELEGRAM_THUMBNAIL_SIZE,
+                TELEGRAM_THUMBNAIL_SIZE,
+                image::ColorType::RGB(8),
+            )
+            .unwrap();
+
+        let url = self.get_url("sendDocument");
+        let form = multipart::Form::new()
+            .part(
+                "document",
+                multipart::Part::bytes(data).file_name("image.png"),
+            )
+            .part("chat_id", multipart::Part::text(chat_id.to_string()))
+            .part(
+                "thumb",
+                multipart::Part::bytes(thumbnail_buffer).file_name("thumbnail.jpg"),
+            )
+            .part(
+                "disable_notification",
+                multipart::Part::text(silent.to_string()),
+            );
+
+        let form = if let Some(c) = caption {
+            form.part("caption", multipart::Part::text(c))
+        } else {
+            form
+        };
+
+        #[derive(Deserialize)]
+        struct Response {
+            ok: bool,
+            result: ApiMessage,
+        }
+
+        self.client
+            .post(url)
+            .multipart(form)
+            .send()
+            .and_then(|response| response.into_body().concat2())
+            .map(|f| serde_json::from_slice(&f).unwrap())
+            .map(|u: Response| u.result.into())
+            .map_err(|e| error!("Getting telegram response: {:?}", e))
+            .compat()
+            .await
+    }
+
     pub async fn get_chat_member(&self, chat_id: i64, user_id: i64) -> Result<User, ()> {
         let url = self.get_url("getChatMember");
         let json = serde_json::json!({

@@ -334,7 +334,7 @@ pub async fn stickerlog<'a>(
         surface.write_to_png(&mut rendered_image).unwrap();
     }
     context
-        .send_photo(msg.chat.id, rendered_image, Some(caption), true)
+        .send_png_lossless(msg.chat.id, rendered_image, Some(caption), true)
         .await
         .map(|_| ())
         .map_err(|e| format!("sending image: {:?}", e))
@@ -647,7 +647,7 @@ async fn wordcount(
             surface.write_to_png(&mut rendered_image).unwrap();
         }
         context
-            .send_photo(command_message.chat.id, rendered_image, None, true)
+            .send_png_lossless(command_message.chat.id, rendered_image, None, true)
             .await
             .map(|_| ())
             .map_err(|_| "sending rendered image".to_string())
