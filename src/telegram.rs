@@ -160,6 +160,15 @@ impl Telegram {
             .await
     }
 
+    pub async fn reply_to(&self, msg_id: u64, chat_id: i64, text: String) -> Result<Message, ()> {
+        let json = serde_json::json!({
+            "reply_to_message_id": msg_id,
+            "chat_id": chat_id,
+            "text": text,
+        });
+        self.send_message_raw(json).await
+    }
+
     pub async fn reply_with_markup(
         &self,
         msg_id: u64,

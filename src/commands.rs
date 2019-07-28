@@ -474,7 +474,11 @@ pub async fn simulate(
 
             if messages.is_empty() {
                 return context
-                    .reply_and_close_keyboard(command_message_id, chatid, "Error: No logged messages in this chat".into())
+                    .reply_and_close_keyboard(
+                        command_message_id,
+                        chatid,
+                        "Error: No logged messages in this chat".into(),
+                    )
                     .await
                     .map(|_| ())
                     .map_err(|e| format!("sending no messages exist message: {:?}", e));
@@ -553,6 +557,101 @@ pub async fn quote(
         .await
         .map(|_| ())
         .map_err(|e| format!("sending qoute: {:?}", e))
+}
+
+async fn wordcount(
+    command_message: &Message,
+    context: Telegram,
+    db_pool: SqlPool,
+) -> Result<(), String> {
+    let conn = db_pool.get().await;
+    let results = conn
+        .prepare_cached(include_sql!("getwordcounts.sql"))
+        .unwrap()
+        .query_map(params![command_message.chat.id, 60], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<(String, u32)>, rusqlite::Error>>()
+        .map_err(|e| format!("getting word counts: {:?}", e))?;
+
+    if results.is_empty() {
+        context
+            .reply_to(
+                command_message.id,
+                command_message.chat.id,
+                "There are no logged messages in this chat!".into(),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|_| "sending log error message".to_string())
+    } else {
+        //Initialize image with some constants
+        let padding = 20.0;
+        let thickness = 25.0;
+        let y_shift = 30.0;
+        let height_unit = 800.0 / f64::from(results[0].1); //Limit height of bar to 800 and have each other bar be a representation of that
+        let width = (padding + thickness) * results.len() as f64 + 50.0;
+        let height = (f64::from(results[0].1) * height_unit + 70.0 + y_shift).ceil();
+        let font_size = 15.0;
+
+        //Perform this in a block such that the cairo context gets dropped before anything else.
+        //Without this, this future won't be Sync.
+        let mut rendered_image = Vec::new();
+        {
+            let surface =
+                cairo::ImageSurface::create(Format::ARgb32, width as i32, height as i32).unwrap();
+            let cairo = cairo::Context::new(&surface);
+            cairo.scale(1.0, 1.0);
+
+            #[allow(clippy::unnecessary_cast)]
+            cairo.set_source_rgba(
+                0x2E as f64 / 0xFF as f64,
+                0x2E as f64 / 0xFF as f64,
+                0x2E as f64 / 0xFF as f64,
+                1.0,
+            );
+            cairo.rectangle(0.0, 0.0, width, height);
+            cairo.fill();
+
+            for (index, (word, uses)) in results.into_iter().enumerate() {
+                cairo.set_source_rgba(0.5, 0.5, 1.0, 1.0);
+                let x_pos = (thickness + padding) * index as f64 + padding;
+                let bar_height = f64::from(uses) * height_unit;
+                cairo.rectangle(x_pos, padding + y_shift, thickness, bar_height);
+                cairo.fill();
+
+                //Render the text
+                cairo.select_font_face("Hack", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+                cairo.set_font_size(font_size);
+                cairo.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+
+                //Number
+                let number_y_position = bar_height + 5.0 + y_shift + padding + font_size;
+                let number_text = uses.to_string();
+                // let extends = cairo.text_extents(&number_text);
+                cairo.move_to(x_pos, number_y_position);
+                cairo.show_text(&number_text);
+
+                //Stagger the text in order make the words more readable
+                let text_y_position = font_size
+                    + if index % 2 == 0 {
+                        y_shift
+                    } else {
+                        y_shift / 2.0
+                    };
+                cairo.move_to(x_pos, text_y_position);
+                cairo.show_text(&word);
+            }
+
+            surface.write_to_png(&mut rendered_image).unwrap();
+        }
+        context
+            .send_photo(command_message.chat.id, rendered_image, None, true)
+            .await
+            .map(|_| ())
+            .map_err(|_| "sending rendered image".to_string())
+    }
 }
 
 //Action constants used in the get_user macro for commands which can take a reply.
@@ -667,6 +766,7 @@ pub async fn handle_command<'a>(
         "/simulatechat" => {
             simulate_chat(msg.chat.clone(), context.clone(), db_pool, redis_pool).await
         }
+        "/wordcount" => wordcount(&msg, context.clone(), db_pool).await,
         "/disaster" => {
             use disaster::add_point;
             with_user!(ACTION_ADD_DISASTER_POINT, add_point(_, &msg, context.clone(), db_pool, redis_pool))
