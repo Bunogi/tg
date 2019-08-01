@@ -382,7 +382,7 @@ async fn simulate_chat(
         }
         Ok(None) => {
             //Create a new chain
-            let mut chain = Chain::new();
+            let mut chain = Chain::of_order(3);
             let messages = db_pool
                 .get()
                 .await
@@ -455,7 +455,7 @@ pub async fn simulate(
         }
         Ok(None) => {
             //Create a new chain
-            let mut chain = Chain::new();
+            let mut chain = Chain::of_order(3);
             let messages = db_pool
                 .get()
                 .await
