@@ -1,0 +1,8 @@
+# Reference config for tg
+[markov]
+chain_order = 1 # Default order of chains if no order is specified
+max_order = 5 # Maximum order
+
+[redis]
+address = "127.0.0.1:6379"
+# password = "foobar"

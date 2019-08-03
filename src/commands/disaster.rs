@@ -1,7 +1,7 @@
 use crate::{
-    db::SqlPool,
     include_sql,
     telegram::{message::Message, Telegram},
+    Context,
 };
 use chrono::prelude::*;
 use darkredis::{Command, CommandList, Value};
@@ -17,12 +17,11 @@ struct LastDisaster {
 pub async fn add_point(
     userid: i64,
     message: &Message,
-    context: Telegram,
-    sql_pool: SqlPool,
-    redis_pool: darkredis::ConnectionPool,
+    telegram: Telegram,
+    context: Context,
 ) -> Result<(), String> {
     if message.from.id as i64 == userid {
-        return context
+        return telegram
             .send_message_silent(
                 message.chat.id,
                 "Cannot give a disaster point to yourself!".into(),
@@ -33,7 +32,7 @@ pub async fn add_point(
     }
 
     //Check if the user is on cooldown for giving a point
-    let mut redis = redis_pool.get().await;
+    let mut redis = context.redis_pool.get().await;
     let cooldown_key = format!(
         "tg.disastercooldown.{}.{}",
         message.chat.id, message.from.id
@@ -52,7 +51,7 @@ pub async fn add_point(
             .map_err(|e| format!("getting cooldown left: {:?}", e))?
             .unwrap_integer();
 
-        return context
+        return telegram
             .reply_and_close_keyboard(
                 message.id,
                 message.chat.id,
@@ -66,7 +65,7 @@ pub async fn add_point(
             .map_err(|e| format!("sending error message: {:?}", e));
     }
 
-    let conn = sql_pool.get().await;
+    let conn = context.db_pool.get().await;
     conn.execute(
         include_sql!("disaster/addpoint.sql"),
         params![message.chat.id, userid],
@@ -110,13 +109,13 @@ pub async fn add_point(
         )
         .map_err(|e| format!("getting user points: {:?}", e))?;
 
-    context
+    telegram
         .reply_and_close_keyboard(
             message.id,
             message.chat.id,
             format!(
                 "{} now has {} disaster points.",
-                crate::util::get_user(message.chat.id, userid, context.clone(), redis.clone())
+                crate::util::get_user(message.chat.id, userid, telegram.clone(), redis.clone())
                     .await,
                 points
             ),
@@ -127,13 +126,8 @@ pub async fn add_point(
     Ok(())
 }
 
-pub async fn show_points(
-    chatid: i64,
-    context: Telegram,
-    sql_pool: SqlPool,
-    redis_pool: darkredis::ConnectionPool,
-) -> Result<(), String> {
-    let conn = sql_pool.get().await;
+pub async fn show_points(chatid: i64, telegram: Telegram, context: Context) -> Result<(), String> {
+    let conn = context.db_pool.get().await;
     let points = conn
         .prepare_cached(include_sql!("disaster/getchatpoints.sql"))
         .unwrap()
@@ -143,20 +137,20 @@ pub async fn show_points(
         .map_err(|e| format!("getting chat points: {:?}", e))?;
 
     if points.is_empty() {
-        return context
+        return telegram
             .send_message_silent(chatid, "No points have been given yet".into())
             .await
             .map(|_| ())
             .map_err(|e| format!("sending no points message: {:?}", e));
     }
 
-    let mut redis = redis_pool.get().await;
+    let mut redis = context.redis_pool.get().await;
     let mut output = String::new();
     //Add user points to output
     for (points, userid) in points {
         let appendage = format!(
             "{}: {}\n",
-            crate::util::get_user(chatid, userid, context.clone(), redis.clone()).await,
+            crate::util::get_user(chatid, userid, telegram.clone(), redis.clone()).await,
             points
         );
 
@@ -183,9 +177,9 @@ pub async fn show_points(
         if let Value::String(v) = value {
             let entry: LastDisaster = rmp_serde::from_slice(&v).unwrap();
             let giver =
-                crate::util::get_user(chatid, entry.from, context.clone(), redis.clone()).await;
+                crate::util::get_user(chatid, entry.from, telegram.clone(), redis.clone()).await;
             let sender =
-                crate::util::get_user(chatid, entry.to, context.clone(), redis.clone()).await;
+                crate::util::get_user(chatid, entry.to, telegram.clone(), redis.clone()).await;
 
             let utc = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(entry.utc, 0), Utc);
             let time_string = utc.with_timezone(&Local).format("%e %B %k:%M %:z");
@@ -197,7 +191,7 @@ pub async fn show_points(
         }
     }
 
-    context
+    telegram
         .send_message_silent(chatid, output)
         .await
         .map_err(|e| format!("sending disaster point count: {:?}", e))?;

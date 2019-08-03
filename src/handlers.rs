@@ -1,27 +1,25 @@
-use crate::commands::{self, handle_command};
-use crate::db::SqlPool;
-use crate::include_sql;
-use crate::telegram::{
-    chat::ChatType,
-    message::{Message, MessageData},
-    update::Update,
-    Telegram,
+use crate::{
+    commands::{self, handle_command},
+    db::SqlPool,
+    include_sql,
+    telegram::{
+        chat::ChatType,
+        message::{Message, MessageData},
+        update::Update,
+        Telegram,
+    },
+    util::get_user_id,
+    Context,
 };
-use crate::util::get_user_id;
 
-pub async fn handle_update(
-    context: Telegram,
-    update: Update,
-    redis_pool: darkredis::ConnectionPool,
-    db_pool: SqlPool,
-) {
+pub async fn handle_update(update: Update, telegram: Telegram, context: Context) {
     use Update::*;
     match update {
         Message(ref msg) => {
-            handle_message(msg, context.clone(), redis_pool.clone(), db_pool.clone()).await;
+            handle_message(msg, telegram, context).await;
         }
         MessageEdited(msg) => {
-            let lock = db_pool.get().await;
+            let lock = context.db_pool.get().await;
             lock.execute(
                 include_sql!("logedit.sql"),
                 params![msg.chat.id as isize, msg.from.id as isize, msg.id as isize],
@@ -69,12 +67,7 @@ async fn log_message(msg: &Message, db_pool: SqlPool) {
     }
 }
 
-async fn handle_message(
-    msg: &Message,
-    context: Telegram,
-    redis_pool: darkredis::ConnectionPool,
-    db_pool: SqlPool,
-) {
+async fn handle_message(msg: &Message, telegram: Telegram, context: Context) {
     //Never log private chats
     let mut should_log = if let ChatType::Private = msg.chat.kind {
         false
@@ -85,23 +78,16 @@ async fn handle_message(
         MessageData::Text(ref text) => {
             //Is command
             if text.chars().nth(0).unwrap() == '/' {
-                handle_command(
-                    &msg,
-                    text,
-                    context.clone(),
-                    redis_pool.clone(),
-                    db_pool.clone(),
-                )
-                .await;
+                handle_command(&msg, text, telegram, context.clone()).await;
                 should_log = false;
             }
         }
         MessageData::Reply(ref data, ref other_message) => {
             //Replying to the bot
-            if other_message.from.id == context.bot_user().id {
+            if other_message.from.id == telegram.bot_user().id {
                 should_log = false;
                 //Check and handle commands that support replying
-                let mut redis = redis_pool.get().await;
+                let mut redis = context.redis_pool.get().await;
                 let key = format!("tg.replycommand.{}.{}", msg.chat.id, other_message.id);
                 match redis.get(&key).await {
                     Ok(Some(command)) => {
@@ -111,7 +97,8 @@ async fn handle_message(
                             commands::ACTION_QUOTE => {
                                 if let MessageData::Text(ref text) = **data {
                                     let userid =
-                                        get_user_id(msg.chat.id, &text, db_pool.clone()).await;
+                                        get_user_id(msg.chat.id, &text, context.db_pool.clone())
+                                            .await;
                                     if userid.is_none() {
                                         return;
                                     } else {
@@ -119,9 +106,8 @@ async fn handle_message(
                                             userid.unwrap(),
                                             msg.chat.id,
                                             msg.id,
+                                            telegram,
                                             context.clone(),
-                                            db_pool.clone(),
-                                            redis_pool.clone(),
                                         )
                                         .await
                                         .map_err(|e| {
@@ -133,18 +119,18 @@ async fn handle_message(
                             commands::ACTION_SIMULATE => {
                                 if let MessageData::Text(ref text) = **data {
                                     let userid =
-                                        get_user_id(msg.chat.id, &text, db_pool.clone()).await;
+                                        get_user_id(msg.chat.id, &text, context.db_pool.clone())
+                                            .await;
                                     if userid.is_none() {
                                         return;
                                     } else {
                                         let _ = crate::commands::simulate(
                                             userid.unwrap(),
                                             msg.chat.id,
-                                            crate::commands::DEFAULT_MARKOV_CHAIN_ORDER,
+                                            context.config.markov.chain_order,
                                             msg.id,
+                                            telegram.clone(),
                                             context.clone(),
-                                            db_pool.clone(),
-                                            redis_pool.clone(),
                                         )
                                         .await
                                         .map_err(|e| {
@@ -156,16 +142,16 @@ async fn handle_message(
                             commands::ACTION_ADD_DISASTER_POINT => {
                                 if let MessageData::Text(ref text) = **data {
                                     let userid =
-                                        get_user_id(msg.chat.id, &text, db_pool.clone()).await;
+                                        get_user_id(msg.chat.id, &text, context.db_pool.clone())
+                                            .await;
                                     if userid.is_none() {
                                         return;
                                     } else {
                                         let _ = crate::commands::disaster::add_point(
                                             userid.unwrap(),
                                             &msg,
-                                            context.clone(),
-                                            db_pool.clone(),
-                                            redis_pool.clone(),
+                                            telegram,
+                                            context.clone()
                                         )
                                         .await
                                         .map_err(|e| {
@@ -192,14 +178,14 @@ async fn handle_message(
         //Replies should be logged as normal messages for now
         if let MessageData::Reply(ref data, _) = msg.data {
             let message = msg.with_data(data);
-            log_message(&message, db_pool.clone()).await;
+            log_message(&message, context.db_pool.clone()).await;
         } else {
-            log_message(msg, db_pool.clone()).await;
+            log_message(msg, context.db_pool.clone()).await;
         }
     }
 
     //Take a snapshot of the user's data
-    let conn = db_pool.get().await;
+    let conn = context.db_pool.get().await;
     conn.execute(
         include_sql!("updateuserdata.sql"),
         params![
