@@ -13,6 +13,8 @@ use markov::Chain;
 
 const TIME_FORMAT: &str = "%A, %e %B %Y %H:%M:%S %Z";
 
+pub const DEFAULT_MARKOV_CHAIN_ORDER: usize = 2;
+
 pub mod disaster;
 
 //Resolves commands written like /command@foobot which telegram does automatically. Cannot support '@' in command names.
@@ -366,12 +368,13 @@ fn merge_messages(messages: &[MessageData], mut index: usize) -> (usize, String)
 
 //This function is almost identical to simulate except it creates a chain with messages from every user and not just one
 async fn simulate_chat(
+    order: usize,
     chat: Chat,
     context: Telegram,
     db_pool: SqlPool,
     redis_pool: darkredis::ConnectionPool,
 ) -> Result<(), String> {
-    let key = format!("tg.markovchain.chat.{}", chat.id);
+    let key = format!("tg.markovchain.chat.{}:{}", chat.id, order);
     let mut redis = redis_pool.get().await;
     let chain = match redis.get(&key).await {
         Ok(Some(ref s)) => {
@@ -382,7 +385,7 @@ async fn simulate_chat(
         }
         Ok(None) => {
             //Create a new chain
-            let mut chain = Chain::of_order(3);
+            let mut chain = Chain::of_order(order);
             let messages = db_pool
                 .get()
                 .await
@@ -439,12 +442,13 @@ async fn simulate_chat(
 pub async fn simulate(
     userid: i64,
     chatid: i64,
+    order: usize,
     command_message_id: u64,
     context: Telegram,
     db_pool: SqlPool,
     redis_pool: darkredis::ConnectionPool,
 ) -> Result<(), String> {
-    let key = format!("tg.markovchain.{}.{}", chatid, userid);
+    let key = format!("tg.markovchain.{}.{}:{}", chatid, userid, order);
     let mut redis = redis_pool.get().await;
     let chain = match redis.get(&key).await {
         Ok(Some(s)) => {
@@ -455,7 +459,7 @@ pub async fn simulate(
         }
         Ok(None) => {
             //Create a new chain
-            let mut chain = Chain::of_order(3);
+            let mut chain = Chain::of_order(order);
             let messages = db_pool
                 .get()
                 .await
@@ -679,6 +683,21 @@ async fn wordcount(
         .map_err(|e| format!("sending word count message: {:?}", e))
 }
 
+fn get_order(from: Option<&String>) -> Result<usize, String> {
+    if let Ok(n) = from
+        .unwrap_or(&DEFAULT_MARKOV_CHAIN_ORDER.to_string())
+        .parse::<usize>()
+    {
+        if n == 0 || n >= 6 {
+            Err("Order must be greater than 0 and less than 6.".into())
+        } else {
+            Ok(n)
+        }
+    } else {
+        Err("Order must be a non-negative integer".into())
+    }
+}
+
 //Action constants used in the get_user macro for commands which can take a reply.
 //A small optimization could be to split these into a human readable and a redis format by using an enum type or something
 pub const ACTION_SIMULATE: &str = "simulate";
@@ -706,7 +725,7 @@ pub async fn handle_command<'a>(
     //Macro for extracting user name and asking for a user using a keyboard if none is given
     macro_rules! with_user {
         ($action:ident, $fun:ident ( _, $( $arg:expr ),* ) ) => {
-            if split.len() == 2 {
+            if split.len() >= 2 {
                 match get_user_id(msg.chat.id, &split[1], db_pool.clone()).await {
                     Some(u) => {
                         $fun(u, $($arg),*).await
@@ -778,19 +797,28 @@ pub async fn handle_command<'a>(
             }
         };
     }
+
     //Potential improvement: ignore handling commands in private chats since they are explicitly not logged anyway
     let res = match root {
         "/leaderboards" => leaderboards(msg.chat.id, context.clone(), redis_pool, db_pool).await,
         "/stickerlog" => stickerlog(msg, &split, context.clone(), redis_pool, db_pool).await,
-        "/quote" => {
-            with_user!(ACTION_QUOTE, quote(_, msg.chat.id, msg.id, context.clone(), db_pool, redis_pool))
-        }
-        "/simulate" => {
-            with_user!(ACTION_SIMULATE, simulate(_, msg.chat.id, msg.id, context.clone(), db_pool, redis_pool))
-        }
-        "/simulatechat" => {
-            simulate_chat(msg.chat.clone(), context.clone(), db_pool, redis_pool).await
-        }
+        "/quote" => with_user!(ACTION_QUOTE, quote(_, msg.chat.id, msg.id, context.clone(), db_pool, redis_pool)),
+        "/simulate" => match get_order(split.iter().nth(2)) {
+            Ok(n) => with_user!(ACTION_SIMULATE, simulate(_, msg.chat.id, n, msg.id,  context.clone(), db_pool, redis_pool)),
+            Err(e) => context
+                .send_message_silent(msg.chat.id, e)
+                .await
+                .map(|_| ())
+                .map_err(|e| format!("sending invalid order message: {:?}", e)),
+        },
+        "/simulatechat" => match get_order(split.iter().nth(1)) {
+            Ok(n) => simulate_chat(n, msg.chat.clone(), context.clone(), db_pool, redis_pool).await,
+            Err(e) => context
+                .send_message_silent(msg.chat.id, e)
+                .await
+                .map(|_| ())
+                .map_err(|e| format!("sending invalid order message: {:?}", e)),
+        },
         "/wordcount" => match split.len() {
             1 => wordcount_graph(&msg, context.clone(), db_pool).await,
             2 => wordcount(&split[1], &msg.chat, context.clone(), db_pool).await,

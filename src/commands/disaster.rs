@@ -75,20 +75,17 @@ pub async fn add_point(
 
     //Update last disaster points given list in redis and set cooldown using a pipeline
     let last_disaster_key = format!("tg.lastdisasterpoints.{}", message.chat.id).into_bytes();
-    let last_disaster =
-        rmp_serde::to_vec(&LastDisaster {
-            from: message.from.id as i64,
-            to: userid,
-            utc: message.date as i64,
-        })
-        .unwrap();
+    let last_disaster = rmp_serde::to_vec(&LastDisaster {
+        from: message.from.id as i64,
+        to: userid,
+        utc: message.date as i64,
+    })
+    .unwrap();
     let timeout = (3 * 60 * 60).to_string();
 
     let command = CommandList::new("LPUSH")
         .arg(&last_disaster_key)
-        .arg(
-            &last_disaster
-        )
+        .arg(&last_disaster)
         .command("LTRIM") // Store the last 10
         .arg(&last_disaster_key)
         .arg(b"0")
@@ -98,7 +95,6 @@ pub async fn add_point(
         .arg(b"")
         .arg(b"EX")
         .arg(&timeout); // 3 hour cooldown
-
 
     redis
         .run_commands(command)

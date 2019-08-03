@@ -140,6 +140,7 @@ async fn handle_message(
                                         let _ = crate::commands::simulate(
                                             userid.unwrap(),
                                             msg.chat.id,
+                                            crate::commands::DEFAULT_MARKOV_CHAIN_ORDER,
                                             msg.id,
                                             context.clone(),
                                             db_pool.clone(),
