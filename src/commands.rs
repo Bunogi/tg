@@ -83,7 +83,14 @@ async fn leaderboards<'a>(chatid: i64, telegram: Telegram, context: Context) -> 
         //whatever reason
         let appendage = format!(
             "{} is the most annoying having sent {} messages!\n",
-            get_user(chatid, user as i64, telegram.clone(), redis.clone()).await,
+            get_user(
+                chatid,
+                user as i64,
+                telegram.clone(),
+                &context.config,
+                redis.clone()
+            )
+            .await,
             count
         );
 
@@ -93,7 +100,14 @@ async fn leaderboards<'a>(chatid: i64, telegram: Telegram, context: Context) -> 
     for m in messages {
         let appendage = format!(
             "{}: {} messages\n",
-            get_user(chatid, m.0 as i64, telegram.clone(), redis.clone()).await,
+            get_user(
+                chatid,
+                m.0 as i64,
+                telegram.clone(),
+                &context.config,
+                redis.clone()
+            )
+            .await,
             m.1
         );
         reply += &appendage;
@@ -102,9 +116,10 @@ async fn leaderboards<'a>(chatid: i64, telegram: Telegram, context: Context) -> 
     // Edits
     let mut edits = edits.into_iter();
     if let Some((user, percentage, count)) = edits.next() {
-        let appendage = format!(
+        let appendage =
+            format!(
             "{} is the biggest disaster, having edited {:.2}% of their messages({} edits total)!\n",
-            get_user(chatid, user as i64, telegram.clone(), redis.clone()).await,
+            get_user(chatid, user as i64, telegram.clone(), &context.config, redis.clone()).await,
             percentage,
             count
         );
@@ -113,7 +128,14 @@ async fn leaderboards<'a>(chatid: i64, telegram: Telegram, context: Context) -> 
     for (user, percentage, count) in edits {
         let appendage = format!(
             "{}: {:.2}% ({})\n",
-            get_user(chatid, user as i64, telegram.clone(), redis.clone()).await,
+            get_user(
+                chatid,
+                user as i64,
+                telegram.clone(),
+                &context.config,
+                redis.clone()
+            )
+            .await,
             percentage,
             count
         );
@@ -416,7 +438,11 @@ async fn simulate_chat(
             //Cache for later
             let serialized = rmp_serde::to_vec(&chain).unwrap();
             redis
-                .set_with_expiry(&key, serialized, std::time::Duration::new(3600 * 24, 0))
+                .set_with_expiry(
+                    &key,
+                    serialized,
+                    std::time::Duration::new(context.config.cache.markov_chain, 0),
+                )
                 .await
                 .unwrap();
             Ok(chain)
@@ -498,7 +524,11 @@ pub async fn simulate(
             //Cache for later
             let serialized = rmp_serde::to_vec(&chain).unwrap();
             redis
-                .set_with_expiry(&key, &serialized, std::time::Duration::new(3600 * 24, 0))
+                .set_with_expiry(
+                    &key,
+                    &serialized,
+                    std::time::Duration::new(context.config.cache.markov_chain, 0),
+                )
                 .await
                 .unwrap();
             Ok(chain)
@@ -508,7 +538,14 @@ pub async fn simulate(
 
     let mut output = format!(
         "{}<s>: {}",
-        get_user(chatid, userid, telegram.clone(), redis.clone()).await,
+        get_user(
+            chatid,
+            userid,
+            telegram.clone(),
+            &context.config,
+            redis.clone()
+        )
+        .await,
         chain.generate_str()
     );
 
@@ -551,7 +588,14 @@ pub async fn quote(
             format!(
                 "\"{}\" -- {}, {}",
                 message,
-                get_user(chatid, userid, telegram.clone(), redis.clone()).await,
+                get_user(
+                    chatid,
+                    userid,
+                    telegram.clone(),
+                    &context.config,
+                    redis.clone()
+                )
+                .await,
                 date
             ),
         )
@@ -686,7 +730,10 @@ fn get_order(from: Option<&String>, max_order: usize) -> Result<usize, String> {
         .parse::<usize>()
     {
         if n == 0 || n > max_order {
-            Err(format!("Order must be greater than 0 and no bigger than {}.", max_order))
+            Err(format!(
+                "Order must be greater than 0 and no bigger than {}.",
+                max_order
+            ))
         } else {
             Ok(n)
         }

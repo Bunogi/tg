@@ -8,7 +8,8 @@ use rusqlite::OptionalExtension;
 pub async fn get_user(
     chat_id: i64,
     user_id: i64,
-    context: Telegram,
+    telegram: Telegram,
+    config: &crate::Config,
     mut redis: darkredis::Connection,
 ) -> User {
     let user_path = format!("tg.user.{}.{}", chat_id, user_id);
@@ -16,13 +17,13 @@ pub async fn get_user(
         Some(u) => rmp_serde::from_slice(&u).unwrap(),
         None => {
             debug!("Getting user from tg");
-            let user = context.get_chat_member(chat_id, user_id).await.unwrap();
+            let user = telegram.get_chat_member(chat_id, user_id).await.unwrap();
             let serialized = rmp_serde::to_vec(&user).unwrap();
             redis
                 .set_with_expiry(
                     &user_path,
                     &serialized,
-                    std::time::Duration::new(3600 * 2, 0),
+                    std::time::Duration::new(config.cache.username, 0),
                 )
                 .await
                 .unwrap();

@@ -80,7 +80,7 @@ pub async fn add_point(
         utc: message.date as i64,
     })
     .unwrap();
-    let timeout = (3 * 60 * 60).to_string();
+    let timeout = (context.config.disaster.cooldown * 3600).to_string();
 
     let command = CommandList::new("LPUSH")
         .arg(&last_disaster_key)
@@ -93,7 +93,7 @@ pub async fn add_point(
         .arg(&cooldown_key)
         .arg(b"")
         .arg(b"EX")
-        .arg(&timeout); // 3 hour cooldown
+        .arg(&timeout); // n hour cooldown
 
     redis
         .run_commands(command)
@@ -115,8 +115,14 @@ pub async fn add_point(
             message.chat.id,
             format!(
                 "{} now has {} disaster points.",
-                crate::util::get_user(message.chat.id, userid, telegram.clone(), redis.clone())
-                    .await,
+                crate::util::get_user(
+                    message.chat.id,
+                    userid,
+                    telegram.clone(),
+                    &context.config,
+                    redis.clone()
+                )
+                .await,
                 points
             ),
         )
@@ -150,7 +156,14 @@ pub async fn show_points(chatid: i64, telegram: Telegram, context: Context) -> R
     for (points, userid) in points {
         let appendage = format!(
             "{}: {}\n",
-            crate::util::get_user(chatid, userid, telegram.clone(), redis.clone()).await,
+            crate::util::get_user(
+                chatid,
+                userid,
+                telegram.clone(),
+                &context.config,
+                redis.clone()
+            )
+            .await,
             points
         );
 
@@ -176,10 +189,22 @@ pub async fn show_points(chatid: i64, telegram: Telegram, context: Context) -> R
     for value in given_points {
         if let Value::String(v) = value {
             let entry: LastDisaster = rmp_serde::from_slice(&v).unwrap();
-            let giver =
-                crate::util::get_user(chatid, entry.from, telegram.clone(), redis.clone()).await;
-            let sender =
-                crate::util::get_user(chatid, entry.to, telegram.clone(), redis.clone()).await;
+            let giver = crate::util::get_user(
+                chatid,
+                entry.from,
+                telegram.clone(),
+                &context.config,
+                redis.clone(),
+            )
+            .await;
+            let sender = crate::util::get_user(
+                chatid,
+                entry.to,
+                telegram.clone(),
+                &context.config,
+                redis.clone(),
+            )
+            .await;
 
             let utc = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(entry.utc, 0), Utc);
             let time_string = utc.with_timezone(&Local).format("%e %B %k:%M %:z");

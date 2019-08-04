@@ -6,3 +6,11 @@ max_order = 5 # Maximum order
 [redis]
 address = "127.0.0.1:6379"
 # password = "foobar"
+
+#Time in seconds to cache each thing
+[cache]
+username = 3600
+markov_chain = 1300
+
+[disaster]
+cooldown = 3 #cooldown time in hours

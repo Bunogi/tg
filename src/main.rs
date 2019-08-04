@@ -22,9 +22,24 @@ mod util;
 
 #[derive(Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Config {
+pub struct Config {
     markov: Markov,
     redis: RedisConfig,
+    cache: CacheConfig,
+    disaster: DisasterConfig,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DisasterConfig {
+    cooldown: u64,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CacheConfig {
+    username: u64,
+    markov_chain: u64,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -108,7 +123,11 @@ async fn main() -> std::io::Result<()> {
     telegram
         .updates()
         .for_each_concurrent(None, |f| {
-            runtime::spawn(handlers::handle_update(f, telegram.clone(), context.clone()))
+            runtime::spawn(handlers::handle_update(
+                f,
+                telegram.clone(),
+                context.clone(),
+            ))
         })
         .await;
     Ok(())
