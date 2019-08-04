@@ -20,7 +20,7 @@ mod handlers;
 mod telegram;
 mod util;
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     markov: Markov,
@@ -29,34 +29,33 @@ pub struct Config {
     disaster: DisasterConfig,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DisasterConfig {
     cooldown: u64,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CacheConfig {
     username: u64,
     markov_chain: u64,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Markov {
     chain_order: usize,
     max_order: usize,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RedisConfig {
     address: String,
     password: Option<String>,
 }
 
-#[derive(Clone)]
 pub struct Context {
     config: Config,
     redis_pool: darkredis::ConnectionPool,
@@ -120,15 +119,11 @@ async fn main() -> std::io::Result<()> {
         redis_pool,
         db_pool,
     };
+
     telegram
         .updates()
-        .for_each_concurrent(None, |f| {
-            runtime::spawn(handlers::handle_update(
-                f,
-                telegram.clone(),
-                context.clone(),
-            ))
-        })
+        .for_each_concurrent(None, |f| handlers::handle_update(f, &telegram, &context))
         .await;
+
     Ok(())
 }

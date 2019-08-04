@@ -33,7 +33,11 @@ fn get_command<'a>(input: &'a str, botname: &str) -> Option<&'a str> {
     }
 }
 
-async fn leaderboards<'a>(chatid: i64, telegram: Telegram, context: Context) -> Result<(), String> {
+async fn leaderboards<'a>(
+    chatid: i64,
+    telegram: &Telegram,
+    context: &Context,
+) -> Result<(), String> {
     let conn = context.db_pool.get().await;
     let messages = conn
         .prepare_cached(include_sql!("getmessages.sql"))
@@ -73,7 +77,7 @@ async fn leaderboards<'a>(chatid: i64, telegram: Telegram, context: Context) -> 
         .map_err(|e| format!("getting edit percentage: {:?}", e))?;
 
     let since = chrono::Local.timestamp(since as i64, 0);
-    let redis = context.redis_pool.get().await;
+    let mut redis = context.redis_pool.get().await;
 
     //Message counts
     let mut reply = format!("{} messages since {}\n", total_msgs, since);
@@ -83,14 +87,7 @@ async fn leaderboards<'a>(chatid: i64, telegram: Telegram, context: Context) -> 
         //whatever reason
         let appendage = format!(
             "{} is the most annoying having sent {} messages!\n",
-            get_user(
-                chatid,
-                user as i64,
-                telegram.clone(),
-                &context.config,
-                redis.clone()
-            )
-            .await,
+            get_user(chatid, user as i64, telegram, &context.config, &mut redis).await,
             count
         );
 
@@ -100,14 +97,7 @@ async fn leaderboards<'a>(chatid: i64, telegram: Telegram, context: Context) -> 
     for m in messages {
         let appendage = format!(
             "{}: {} messages\n",
-            get_user(
-                chatid,
-                m.0 as i64,
-                telegram.clone(),
-                &context.config,
-                redis.clone()
-            )
-            .await,
+            get_user(chatid, m.0 as i64, telegram, &context.config, &mut redis).await,
             m.1
         );
         reply += &appendage;
@@ -116,10 +106,9 @@ async fn leaderboards<'a>(chatid: i64, telegram: Telegram, context: Context) -> 
     // Edits
     let mut edits = edits.into_iter();
     if let Some((user, percentage, count)) = edits.next() {
-        let appendage =
-            format!(
+        let appendage = format!(
             "{} is the biggest disaster, having edited {:.2}% of their messages({} edits total)!\n",
-            get_user(chatid, user as i64, telegram.clone(), &context.config, redis.clone()).await,
+            get_user(chatid, user as i64, telegram, &context.config, &mut redis).await,
             percentage,
             count
         );
@@ -128,14 +117,7 @@ async fn leaderboards<'a>(chatid: i64, telegram: Telegram, context: Context) -> 
     for (user, percentage, count) in edits {
         let appendage = format!(
             "{}: {:.2}% ({})\n",
-            get_user(
-                chatid,
-                user as i64,
-                telegram.clone(),
-                &context.config,
-                redis.clone()
-            )
-            .await,
+            get_user(chatid, user as i64, &telegram, &context.config, &mut redis).await,
             percentage,
             count
         );
@@ -152,8 +134,8 @@ async fn leaderboards<'a>(chatid: i64, telegram: Telegram, context: Context) -> 
 pub async fn stickerlog<'a>(
     msg: &'a Message,
     args: &'a [String],
-    telegram: Telegram,
-    context: Context,
+    telegram: &Telegram,
+    context: &Context,
 ) -> Result<(), String> {
     let (caption, images, usages) = {
         let parsed_time = parse_time(&args[1..]);
@@ -235,7 +217,7 @@ pub async fn stickerlog<'a>(
                 Ok(None) => {
                     debug!("File {} not saved in redis, downloading from Telegram", f);
                     let file_key = telegram
-                        .download_file(redis.clone(), &f)
+                        .download_file(&mut redis, &f)
                         .await
                         .map_err(|e| format!("downloading file {}: {:?}", f, e))?;
                     images.push(
@@ -388,9 +370,9 @@ fn merge_messages(messages: &[MessageData], mut index: usize) -> (usize, String)
 //This function is almost identical to simulate except it creates a chain with messages from every user and not just one
 async fn simulate_chat(
     order: usize,
-    chat: Chat,
-    telegram: Telegram,
-    context: Context,
+    chat: &Chat,
+    telegram: &Telegram,
+    context: &Context,
 ) -> Result<(), String> {
     let key = format!("tg.markovchain.chat.{}:{}", chat.id, order);
     let mut redis = context.redis_pool.get().await;
@@ -467,8 +449,8 @@ pub async fn simulate(
     chatid: i64,
     order: usize,
     command_message_id: u64,
-    telegram: Telegram,
-    context: Context,
+    telegram: &Telegram,
+    context: &Context,
 ) -> Result<(), String> {
     let key = format!("tg.markovchain.{}.{}:{}", chatid, userid, order);
     let mut redis = context.redis_pool.get().await;
@@ -538,14 +520,7 @@ pub async fn simulate(
 
     let mut output = format!(
         "{}<s>: {}",
-        get_user(
-            chatid,
-            userid,
-            telegram.clone(),
-            &context.config,
-            redis.clone()
-        )
-        .await,
+        get_user(chatid, userid, telegram, &context.config, &mut redis).await,
         chain.generate_str()
     );
 
@@ -563,8 +538,8 @@ pub async fn quote(
     userid: i64,
     chatid: i64,
     command_message_id: u64,
-    telegram: Telegram,
-    context: Context,
+    telegram: &Telegram,
+    context: &Context,
 ) -> Result<(), String> {
     let (message, timestamp): (String, isize) = context
         .db_pool
@@ -579,7 +554,7 @@ pub async fn quote(
 
     let date: DateTime<Local> = Utc.timestamp(timestamp as i64, 0).with_timezone(&Local);
 
-    let redis = context.redis_pool.get().await;
+    let mut redis = context.redis_pool.get().await;
 
     telegram
         .reply_and_close_keyboard(
@@ -588,14 +563,7 @@ pub async fn quote(
             format!(
                 "\"{}\" -- {}, {}",
                 message,
-                get_user(
-                    chatid,
-                    userid,
-                    telegram.clone(),
-                    &context.config,
-                    redis.clone()
-                )
-                .await,
+                get_user(chatid, userid, telegram, &context.config, &mut redis).await,
                 date
             ),
         )
@@ -606,8 +574,8 @@ pub async fn quote(
 
 async fn wordcount_graph(
     command_message: &Message,
-    telegram: Telegram,
-    context: Context,
+    telegram: &Telegram,
+    context: &Context,
 ) -> Result<(), String> {
     let conn = context.db_pool.get().await;
     let results = conn
@@ -702,8 +670,8 @@ async fn wordcount_graph(
 async fn wordcount(
     word: &str,
     chat: &Chat,
-    telegram: Telegram,
-    context: Context,
+    telegram: &Telegram,
+    context: &Context,
 ) -> Result<(), String> {
     let conn = context.db_pool.get().await;
     let usages: isize = conn
@@ -748,12 +716,7 @@ pub const ACTION_SIMULATE: &str = "simulate";
 pub const ACTION_QUOTE: &str = "quote";
 pub const ACTION_ADD_DISASTER_POINT: &str = "give a disaster point";
 
-pub async fn handle_command<'a>(
-    msg: &'a Message,
-    msg_text: &'a str,
-    telegram: Telegram,
-    context: Context,
-) {
+pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, context: &Context) {
     let split: Vec<String> = msg_text.split_whitespace().map(|s| s.into()).collect();
     let root = if let ChatType::Private = msg.chat.kind {
         split[0].as_str()
@@ -769,7 +732,7 @@ pub async fn handle_command<'a>(
     macro_rules! with_user {
         ($action:ident, $fun:ident ( _, $( $arg:expr ),* ) ) => {
             if split.len() >= 2 {
-                match get_user_id(msg.chat.id, &split[1], context.db_pool.clone()).await {
+                match get_user_id(msg.chat.id, &split[1], &context.db_pool).await {
                     Some(u) => {
                         $fun(u, $($arg),*).await
                     }
@@ -843,11 +806,11 @@ pub async fn handle_command<'a>(
 
     //Potential improvement: ignore handling commands in private chats since they are explicitly not logged anyway
     let res = match root {
-        "/leaderboards" => leaderboards(msg.chat.id, telegram.clone(), context).await,
-        "/stickerlog" => stickerlog(msg, &split, telegram.clone(), context).await,
-        "/quote" => with_user!(ACTION_QUOTE, quote(_, msg.chat.id, msg.id, telegram.clone(),context)),
+        "/leaderboards" => leaderboards(msg.chat.id, telegram, context).await,
+        "/stickerlog" => stickerlog(msg, &split, telegram, context).await,
+        "/quote" => with_user!(ACTION_QUOTE, quote(_, msg.chat.id, msg.id, telegram,context)),
         "/simulate" => match get_order(split.iter().nth(2), context.config.markov.max_order) {
-            Ok(n) => with_user!(ACTION_SIMULATE, simulate(_, msg.chat.id, n, msg.id, telegram.clone(), context)),
+            Ok(n) => with_user!(ACTION_SIMULATE, simulate(_, msg.chat.id, n, msg.id, telegram, context)),
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)
                 .await
@@ -855,7 +818,7 @@ pub async fn handle_command<'a>(
                 .map_err(|e| format!("sending invalid order message: {:?}", e)),
         },
         "/simulatechat" => match get_order(split.iter().nth(1), context.config.markov.max_order) {
-            Ok(n) => simulate_chat(n, msg.chat.clone(), telegram.clone(), context).await,
+            Ok(n) => simulate_chat(n, &msg.chat, telegram, context).await,
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)
                 .await
@@ -863,8 +826,8 @@ pub async fn handle_command<'a>(
                 .map_err(|e| format!("sending invalid order message: {:?}", e)),
         },
         "/wordcount" => match split.len() {
-            1 => wordcount_graph(&msg, telegram.clone(), context).await,
-            2 => wordcount(&split[1], &msg.chat, telegram.clone(), context).await,
+            1 => wordcount_graph(&msg, telegram, context).await,
+            2 => wordcount(&split[1], &msg.chat, telegram, context).await,
             _ => telegram
                 .send_message_silent(msg.chat.id, "Invalid number of arguments".to_string())
                 .await
@@ -873,9 +836,12 @@ pub async fn handle_command<'a>(
         },
         "/disaster" => {
             use disaster::add_point;
-            with_user!(ACTION_ADD_DISASTER_POINT, add_point(_, &msg, telegram.clone(),context))
+            with_user!(
+                ACTION_ADD_DISASTER_POINT,
+                add_point(_, &msg, telegram, context)
+            )
         }
-        "/disasterpoints" => disaster::show_points(msg.chat.id, telegram.clone(), context).await,
+        "/disasterpoints" => disaster::show_points(msg.chat.id, telegram, context).await,
         _ => {
             warn!("No command found for {}", root);
             if let ChatType::Private = msg.chat.kind {

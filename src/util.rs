@@ -8,9 +8,9 @@ use rusqlite::OptionalExtension;
 pub async fn get_user(
     chat_id: i64,
     user_id: i64,
-    telegram: Telegram,
+    telegram: &Telegram,
     config: &crate::Config,
-    mut redis: darkredis::Connection,
+    redis: &mut darkredis::Connection,
 ) -> User {
     let user_path = format!("tg.user.{}.{}", chat_id, user_id);
     match redis.get(&user_path).await.unwrap() {
@@ -62,7 +62,7 @@ pub fn parse_time(input: &[String]) -> Option<Duration> {
 
 //Returns the last known user id matching name in chat_id
 //If multiple users match, it will pick one at complete random due to how SQLite works
-pub async fn get_user_id(chat_id: i64, name: &str, pool: SqlPool) -> Option<i64> {
+pub async fn get_user_id(chat_id: i64, name: &str, pool: &SqlPool) -> Option<i64> {
     let conn = pool.get().await;
     conn.query_row(
         include_sql!("getuseridfromname.sql"),
