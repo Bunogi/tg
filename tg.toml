@@ -1,4 +1,7 @@
 # Reference config for tg
+[general]
+time_format = "%A, %e %B %Y %H:%M:%S %Z"
+
 [markov]
 chain_order = 1 # Default order of chains if no order is specified
 max_order = 5 # Maximum order

@@ -14,10 +14,6 @@ use chrono::{prelude::*, NaiveDateTime, Utc};
 use libc::c_int;
 use markov::Chain;
 
-const TIME_FORMAT: &str = "%A, %e %B %Y %H:%M:%S %Z";
-
-pub const DEFAULT_MARKOV_CHAIN_ORDER: usize = 2;
-
 pub mod disaster;
 
 //Resolves commands written like /command@foobot which telegram does automatically. Cannot support '@' in command names.
@@ -174,7 +170,7 @@ pub async fn stickerlog<'a>(
                     msg.chat.id,
                     format!(
                         "I have no recorded stickers after {}",
-                        from_time.with_timezone(&Local).format(TIME_FORMAT)
+                        from_time.with_timezone(&Local).format(&context.config.general.time_format)
                     ),
                 )
                 .await
@@ -190,7 +186,7 @@ pub async fn stickerlog<'a>(
             if from_time.naive_utc().timestamp() == 0 {
                 "the dawn of time".to_string()
             } else {
-                format!("{}", from_time.with_timezone(&Local).format(TIME_FORMAT))
+                format!("{}", from_time.with_timezone(&Local).format(&context.config.general.time_format))
             }
         );
 
@@ -692,15 +688,15 @@ async fn wordcount(
         .map_err(|e| format!("sending word count message: {:?}", e))
 }
 
-fn get_order(from: Option<&String>, max_order: usize) -> Result<usize, String> {
+fn get_order(from: Option<&String>, context: &Context) -> Result<usize, String> {
     if let Ok(n) = from
-        .unwrap_or(&DEFAULT_MARKOV_CHAIN_ORDER.to_string())
+        .unwrap_or(&context.config.markov.chain_order.to_string())
         .parse::<usize>()
     {
-        if n == 0 || n > max_order {
+        if n == 0 || n > context.config.markov.max_order {
             Err(format!(
                 "Order must be greater than 0 and no bigger than {}.",
-                max_order
+                context.config.markov.max_order
             ))
         } else {
             Ok(n)
@@ -809,7 +805,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         "/leaderboards" => leaderboards(msg.chat.id, telegram, context).await,
         "/stickerlog" => stickerlog(msg, &split, telegram, context).await,
         "/quote" => with_user!(ACTION_QUOTE, quote(_, msg.chat.id, msg.id, telegram,context)),
-        "/simulate" => match get_order(split.iter().nth(2), context.config.markov.max_order) {
+        "/simulate" => match get_order(split.iter().nth(2), context) {
             Ok(n) => with_user!(ACTION_SIMULATE, simulate(_, msg.chat.id, n, msg.id, telegram, context)),
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)
@@ -817,7 +813,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                 .map(|_| ())
                 .map_err(|e| format!("sending invalid order message: {:?}", e)),
         },
-        "/simulatechat" => match get_order(split.iter().nth(1), context.config.markov.max_order) {
+        "/simulatechat" => match get_order(split.iter().nth(1), context) {
             Ok(n) => simulate_chat(n, &msg.chat, telegram, context).await,
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)

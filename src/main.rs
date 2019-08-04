@@ -27,6 +27,13 @@ pub struct Config {
     redis: RedisConfig,
     cache: CacheConfig,
     disaster: DisasterConfig,
+    general: GeneralConfig,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GeneralConfig {
+    time_format: String,
 }
 
 #[derive(Default, Deserialize)]
