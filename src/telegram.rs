@@ -95,7 +95,6 @@ impl Telegram {
         //TODO return error, use a more generic struct for api responses
         #[derive(Deserialize)]
         struct Response {
-            ok: bool,
             result: User,
         }
 
@@ -144,7 +143,6 @@ impl Telegram {
 
         #[derive(Deserialize)]
         struct Response {
-            ok: bool,
             result: ApiMessage,
         };
 
@@ -214,14 +212,13 @@ impl Telegram {
         self.send_message_raw(json).await
     }
 
-    //TODO return proper error type
-    pub async fn send_message(&self, chat_id: i64, text: String) -> Result<Message, ()> {
-        let json = serde_json::json!({
-            "chat_id": chat_id,
-            "text": text
-        });
-        self.send_message_raw(json).await
-    }
+    // pub async fn send_message(&self, chat_id: i64, text: String) -> Result<Message, ()> {
+    //     let json = serde_json::json!({
+    //         "chat_id": chat_id,
+    //         "text": text
+    //     });
+    //     self.send_message_raw(json).await
+    // }
 
     //Returns redis path of the downloaded file
     pub async fn download_file(
@@ -235,7 +232,6 @@ impl Telegram {
         }
         #[derive(Deserialize)]
         struct FileResp {
-            ok: bool,
             result: File,
         }
 
@@ -279,45 +275,45 @@ impl Telegram {
         Ok(key)
     }
 
-    pub async fn send_photo<'a>(
-        &'a self,
-        chat_id: i64,
-        data: Vec<u8>,
-        caption: Option<String>,
-        silent: bool,
-    ) -> Result<Message, ()> {
-        let url = self.get_url("sendPhoto");
-        let form = multipart::Form::new()
-            .part("photo", multipart::Part::bytes(data).file_name("image.png"))
-            .part("chat_id", multipart::Part::text(chat_id.to_string()))
-            .part(
-                "disable_notification",
-                multipart::Part::text(silent.to_string()),
-            );
+    // pub async fn send_photo<'a>(
+    //     &'a self,
+    //     chat_id: i64,
+    //     data: Vec<u8>,
+    //     caption: Option<String>,
+    //     silent: bool,
+    // ) -> Result<Message, ()> {
+    //     let url = self.get_url("sendPhoto");
+    //     let form = multipart::Form::new()
+    //         .part("photo", multipart::Part::bytes(data).file_name("image.png"))
+    //         .part("chat_id", multipart::Part::text(chat_id.to_string()))
+    //         .part(
+    //             "disable_notification",
+    //             multipart::Part::text(silent.to_string()),
+    //         );
 
-        let form = if let Some(c) = caption {
-            form.part("caption", multipart::Part::text(c))
-        } else {
-            form
-        };
+    //     let form = if let Some(c) = caption {
+    //         form.part("caption", multipart::Part::text(c))
+    //     } else {
+    //         form
+    //     };
 
-        #[derive(Deserialize)]
-        struct Response {
-            ok: bool,
-            result: ApiMessage,
-        }
+    //     #[derive(Deserialize)]
+    //     struct Response {
+    //         ok: bool,
+    //         result: ApiMessage,
+    //     }
 
-        self.client
-            .post(url)
-            .multipart(form)
-            .send()
-            .and_then(|response| response.into_body().concat2())
-            .map(|f| serde_json::from_slice(&f).unwrap())
-            .map(|u: Response| u.result.into())
-            .map_err(|_| ())
-            .compat()
-            .await
-    }
+    //     self.client
+    //         .post(url)
+    //         .multipart(form)
+    //         .send()
+    //         .and_then(|response| response.into_body().concat2())
+    //         .map(|f| serde_json::from_slice(&f).unwrap())
+    //         .map(|u: Response| u.result.into())
+    //         .map_err(|_| ())
+    //         .compat()
+    //         .await
+    // }
 
     //Send a message in png format, panics if data is not a valid PNG image
     pub async fn send_png_lossless(
@@ -347,7 +343,6 @@ impl Telegram {
 
         #[derive(Deserialize)]
         struct Response {
-            ok: bool,
             result: ApiMessage,
         }
 
@@ -377,7 +372,6 @@ impl Telegram {
 
         #[derive(Deserialize)]
         struct Response {
-            ok: bool,
             result: RespResult,
         };
 

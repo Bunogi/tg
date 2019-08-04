@@ -805,7 +805,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         "/leaderboards" => leaderboards(msg.chat.id, telegram, context).await,
         "/stickerlog" => stickerlog(msg, &split, telegram, context).await,
         "/quote" => with_user!(ACTION_QUOTE, quote(_, msg.chat.id, msg.id, telegram,context)),
-        "/simulate" => match get_order(split.iter().nth(2), context) {
+        "/simulate" => match get_order(split.get(2), context) {
             Ok(n) => with_user!(ACTION_SIMULATE, simulate(_, msg.chat.id, n, msg.id, telegram, context)),
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)
@@ -813,7 +813,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                 .map(|_| ())
                 .map_err(|e| format!("sending invalid order message: {:?}", e)),
         },
-        "/simulatechat" => match get_order(split.iter().nth(1), context) {
+        "/simulatechat" => match get_order(split.get(1), context) {
             Ok(n) => simulate_chat(n, &msg.chat, telegram, context).await,
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)
