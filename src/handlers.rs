@@ -1,6 +1,5 @@
 use crate::{
     commands::{self, handle_command},
-    db::SqlPool,
     include_sql,
     telegram::{
         chat::ChatType,
@@ -8,7 +7,7 @@ use crate::{
         update::Update,
         Telegram,
     },
-    util::get_user_id,
+    util::{calculate_sticker_hash, get_user_id},
     Context,
 };
 
@@ -31,10 +30,10 @@ pub async fn handle_update(update: Update, telegram: &Telegram, context: &Contex
     }
 }
 
-async fn log_message(msg: &Message, db_pool: &SqlPool) {
+async fn log_message(telegram: &Telegram, msg: &Message, context: &Context) {
     match msg.data {
         MessageData::Text(ref text) => {
-            let lock = db_pool.get().await;
+            let lock = context.db_pool.get().await;
             lock.execute(
                 include_sql!("logmessage.sql"),
                 params![
@@ -48,7 +47,16 @@ async fn log_message(msg: &Message, db_pool: &SqlPool) {
             .unwrap();
         }
         MessageData::Sticker(ref sticker) => {
-            let lock = db_pool.get().await;
+            let mut redis = context.redis_pool.get().await;
+            let set_name: &str = sticker.set_name.as_ref().map(|s| s.as_str()).unwrap_or("");
+            let emoji: &str = sticker.emoji.as_ref().map(|s| s.as_str()).unwrap_or("");
+            let hash =
+                calculate_sticker_hash(telegram, &mut redis, &sticker.file_id, set_name, emoji)
+                    .await;
+            if hash.is_err() {
+                return;
+            } //this error gets logged elsewhere anyway
+            let lock = context.db_pool.get().await;
             lock.execute(
                 include_sql!("logsticker.sql"),
                 params![
@@ -59,6 +67,7 @@ async fn log_message(msg: &Message, db_pool: &SqlPool) {
                     sticker.emoji,
                     sticker.set_name,
                     msg.date as isize,
+                    hash.unwrap()
                 ],
             )
             .unwrap();
@@ -98,11 +107,9 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
                                 if let MessageData::Text(ref text) = **data {
                                     let userid =
                                         get_user_id(msg.chat.id, &text, &context.db_pool).await;
-                                    if userid.is_none() {
-                                        return;
-                                    } else {
+                                    if let Some(userid) = userid {
                                         let _ = crate::commands::quote(
-                                            userid.unwrap(),
+                                            userid,
                                             msg.chat.id,
                                             msg.id,
                                             telegram,
@@ -112,6 +119,8 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
                                         .map_err(|e| {
                                             error!("failed to quote from reply message: {:?}", e)
                                         });
+                                    } else {
+                                        return;
                                     }
                                 }
                             }
@@ -119,11 +128,9 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
                                 if let MessageData::Text(ref text) = **data {
                                     let userid =
                                         get_user_id(msg.chat.id, &text, &context.db_pool).await;
-                                    if userid.is_none() {
-                                        return;
-                                    } else {
+                                    if let Some(userid) = userid {
                                         let _ = crate::commands::simulate(
-                                            userid.unwrap(),
+                                            userid,
                                             msg.chat.id,
                                             context.config.markov.chain_order,
                                             msg.id,
@@ -134,6 +141,8 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
                                         .map_err(|e| {
                                             error!("failed to simulate from reply message: {:?}", e)
                                         });
+                                    } else {
+                                        return;
                                     }
                                 }
                             }
@@ -141,11 +150,9 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
                                 if let MessageData::Text(ref text) = **data {
                                     let userid =
                                         get_user_id(msg.chat.id, &text, &context.db_pool).await;
-                                    if userid.is_none() {
-                                        return;
-                                    } else {
+                                    if let Some(userid) = userid {
                                         let _ = crate::commands::disaster::add_point(
-                                            userid.unwrap(),
+                                            userid,
                                             &msg,
                                             telegram,
                                             context
@@ -154,6 +161,8 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
                                         .map_err(|e| {
                                             error!("failed to add a disaster point from reply message: {:?}", e)
                                         });
+                                    } else {
+                                        return;
                                     }
                                 }
                             }
@@ -175,9 +184,9 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
         //Replies should be logged as normal messages for now
         if let MessageData::Reply(ref data, _) = msg.data {
             let message = msg.with_data(data);
-            log_message(&message, &context.db_pool).await;
+            log_message(&telegram, &message, &context).await;
         } else {
-            log_message(msg, &context.db_pool).await;
+            log_message(&telegram, msg, &context).await;
         }
     }
 

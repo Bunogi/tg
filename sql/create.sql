@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS StickerLogs (
   fileid TEXT NOT NULL,
   packname TEXT,
   emoji TEXT,
-  instant INTEGER NOT NULL
+  instant INTEGER NOT NULL,
+  hash BLOB NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS LastUserData (

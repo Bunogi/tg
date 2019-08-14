@@ -1,2 +1,2 @@
-INSERT INTO StickerLogs(userid, chatid, msgid, fileid, emoji, packname, instant)
-VALUES(?,?,?,?,?,?,?)
+INSERT INTO StickerLogs(userid, chatid, msgid, fileid, emoji, packname, instant, hash)
+VALUES(?,?,?,?,?,?,?,?)

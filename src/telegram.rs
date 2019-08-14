@@ -220,59 +220,70 @@ impl Telegram {
     //     self.send_message_raw(json).await
     // }
 
-    //Returns redis path of the downloaded file
     pub async fn download_file(
         &self,
         redis: &mut darkredis::Connection,
         file_id: &str,
-    ) -> Result<String, ()> {
-        #[derive(Deserialize)]
-        struct File {
-            file_path: String,
-        }
-        #[derive(Deserialize)]
-        struct FileResp {
-            result: File,
-        }
-
-        let get_file = self.get_url("getFile");
-        let json = serde_json::json!({ "file_id": file_id });
-        let file_path = self
-            .client
-            .get(get_file)
-            .json(&json)
-            .send()
-            .and_then(|response| response.into_body().concat2())
-            .map(|f| serde_json::from_slice(&f).unwrap())
-            .map(|m: FileResp| m.result.file_path)
-            .map_err(|e| error!("Failed to get download link for {}: {:?}", file_id, &e))
-            .compat()
-            .await?;
-
-        let file: Vec<u8> = self
-            .client
-            .get(
-                Url::parse(&format!(
-                    "https://api.telegram.org/file/bot{}/{}",
-                    self.token, file_path
-                ))
-                .unwrap(),
-            )
-            .send()
-            .and_then(|response| response.into_body().concat2())
-            .map(|f| f.iter().cloned().collect::<Vec<u8>>())
-            .map_err(|e| error!("Failed to download {}: {:?}", file_id, &e))
-            .compat()
-            .await?;
-
+    ) -> Result<Vec<u8>, ()> {
         let key = format!("tg.download.{}", file_id);
+        match redis.get(&key).await {
+            Ok(Some(f)) => Ok(f),
+            Ok(None) => {
+                info!("Downloading file {} from Telegram...", file_id);
+                #[derive(Deserialize)]
+                struct File {
+                    file_path: String,
+                }
+                #[derive(Deserialize)]
+                struct FileResp {
+                    result: File,
+                }
 
-        redis
-            .set(&key, &file)
-            .map_err(|e| error!("Couldn't set key {}: {:?}", key, e))
-            .await?;
+                let get_file = self.get_url("getFile");
+                let json = serde_json::json!({ "file_id": file_id });
+                let file_path = self
+                    .client
+                    .get(get_file)
+                    .json(&json)
+                    .send()
+                    .and_then(|response| response.into_body().concat2())
+                    .map(|f| serde_json::from_slice(&f).unwrap())
+                    .map(|m: FileResp| m.result.file_path)
+                    .map_err(|e| error!("Failed to get download link for {}: {:?}", file_id, &e))
+                    .compat()
+                    .await?;
 
-        Ok(key)
+                let file: Vec<u8> = self
+                    .client
+                    .get(
+                        Url::parse(&format!(
+                            "https://api.telegram.org/file/bot{}/{}",
+                            self.token, file_path
+                        ))
+                        .unwrap(),
+                    )
+                    .send()
+                    .and_then(|response| response.into_body().concat2())
+                    .map(|f| f.iter().cloned().collect::<Vec<u8>>())
+                    .map_err(|e| error!("Failed to download {}: {:?}", file_id, &e))
+                    .compat()
+                    .await?;
+
+                redis
+                    .set(&key, &file)
+                    .map_err(|e| error!("Couldn't set key {}: {:?}", key, e))
+                    .await?;
+
+                Ok(file)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to get possibly predownloaded file {}: {}",
+                    file_id, e
+                );
+                Err(())
+            }
+        }
     }
 
     // pub async fn send_photo<'a>(

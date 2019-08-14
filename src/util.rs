@@ -2,6 +2,7 @@ use crate::db::SqlPool;
 use crate::include_sql;
 use crate::telegram::{user::User, Telegram};
 use chrono::Duration;
+use md5::{Digest, Md5};
 use rusqlite::OptionalExtension;
 
 //Will get the user from cache if it is cached, otherwise request the data
@@ -93,5 +94,50 @@ pub unsafe fn rgba_to_cairo(mut ptr: *mut u8, len: usize) {
         *ptr.offset(2) = (f64::from(*ptr.offset(2)) * a).round() as u8;
 
         ptr = ptr.offset(4);
+    }
+}
+
+pub async fn calculate_sticker_hash(
+    telegram: &Telegram,
+    mut redis: &mut darkredis::Connection,
+    file_id: &str,
+    set_name: &str,
+    emoji: &str,
+) -> Result<Vec<u8>, ()> {
+    let command = darkredis::Command::new("HGET")
+        .arg(b"tg.sticker.hashes")
+        .arg(&file_id);
+
+    match redis
+        .run_command(command)
+        .await
+        .map_err(|e| error!("Couldn't get data from hash key: {}", e))?
+        .optional_string()
+    {
+        Some(s) => Ok(s),
+        None => {
+            let mut hasher = Md5::new();
+            //Logging this failure is not needed since download_file will log failed downloads anyway
+            let sticker_file = telegram
+                .download_file(&mut redis, file_id)
+                .await
+                .map_err(|_| ())?;
+            hasher.input(&sticker_file);
+            hasher.input(set_name);
+            hasher.input(emoji);
+            let result = hasher.result();
+            let res = result.as_slice();
+            let command = darkredis::Command::new("HSET")
+                .arg(b"tg.sticker.hashes")
+                .arg(&file_id)
+                .arg(&res);
+
+            redis
+                .run_command(command)
+                .await
+                .map_err(|e| error!("Couldn't set sticker hash: {}", e))?;
+
+            Ok(result.as_slice().to_vec())
+        }
     }
 }

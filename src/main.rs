@@ -127,10 +127,11 @@ async fn main() -> std::io::Result<()> {
         db_pool,
     };
 
-    telegram
-        .updates()
-        .for_each_concurrent(None, |f| handlers::handle_update(f, &telegram, &context))
-        .await;
-
-    Ok(())
+    loop {
+        info!("Listening to updates...");
+        telegram
+            .updates()
+            .for_each_concurrent(None, |f| handlers::handle_update(f, &telegram, &context))
+            .await;
+    }
 }

@@ -8,7 +8,6 @@ use crate::{
     util::{get_user, get_user_id, parse_time, rgba_to_cairo},
     Context,
 };
-
 use cairo::Format;
 use chrono::{prelude::*, NaiveDateTime, Utc};
 use libc::c_int;
@@ -170,7 +169,9 @@ pub async fn stickerlog<'a>(
                     msg.chat.id,
                     format!(
                         "I have no recorded stickers after {}",
-                        from_time.with_timezone(&Local).format(&context.config.general.time_format)
+                        from_time
+                            .with_timezone(&Local)
+                            .format(&context.config.general.time_format)
                     ),
                 )
                 .await
@@ -186,7 +187,12 @@ pub async fn stickerlog<'a>(
             if from_time.naive_utc().timestamp() == 0 {
                 "the dawn of time".to_string()
             } else {
-                format!("{}", from_time.with_timezone(&Local).format(&context.config.general.time_format))
+                format!(
+                    "{}",
+                    from_time
+                        .with_timezone(&Local)
+                        .format(&context.config.general.time_format)
+                )
             }
         );
 
@@ -207,25 +213,11 @@ pub async fn stickerlog<'a>(
         let mut redis = context.redis_pool.get().await;
         let mut images = Vec::new();
         for f in file_ids {
-            let key = format!("tg.download.{}", f);
-            match redis.get(&key).await {
-                Ok(Some(v)) => images.push(v),
-                Ok(None) => {
-                    debug!("File {} not saved in redis, downloading from Telegram", f);
-                    let file_key = telegram
-                        .download_file(&mut redis, &f)
-                        .await
-                        .map_err(|e| format!("downloading file {}: {:?}", f, e))?;
-                    images.push(
-                        redis
-                            .get(&file_key)
-                            .await
-                            .map_err(|e| format!("getting image from Redis: {}: {:?}", f, e))?
-                            .unwrap(),
-                    );
-                }
-                Err(e) => return Err(format!("communicating with Redis: {:?}", e)),
-            }
+            let image = telegram
+                .download_file(&mut redis, &f)
+                .await
+                .map_err(|e| format!("downloading file {}: {:?}", f, e))?;
+            images.push(image);
         }
         (caption, images, usages)
     };
