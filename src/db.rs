@@ -18,7 +18,7 @@ impl SqlPool {
         }
         Ok(Self { connections, path })
     }
-    pub async fn get(&self) -> MutexGuard<Connection> {
+    pub async fn get(&self) -> MutexGuard<'_, Connection> {
         for conn in self.connections.iter() {
             if let Some(lock) = conn.try_lock() {
                 return lock;

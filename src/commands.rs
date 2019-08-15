@@ -75,7 +75,7 @@ async fn leaderboards<'a>(
     let mut redis = context.redis_pool.get().await;
 
     //Message counts
-    let mut reply = format!("{} messages since {}\n", total_msgs, since);
+    let mut reply = format!("```\n{} messages since {}\n", total_msgs, since);
     let mut messages = messages.into_iter();
     if let Some((user, count)) = messages.next() {
         //store appendage here because otherwise this future doesn't implement Sync for
@@ -120,7 +120,7 @@ async fn leaderboards<'a>(
         reply += &appendage;
     }
     telegram
-        .send_message_silent(chatid, reply)
+        .send_message_silently_with_markdown(chatid, format!("{}```", reply))
         .await
         .map(|_| ())
         .map_err(|e| format!("sending message: {:?}", e))

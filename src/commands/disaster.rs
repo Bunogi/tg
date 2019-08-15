@@ -155,7 +155,7 @@ pub async fn show_points(
     }
 
     let mut redis = context.redis_pool.get().await;
-    let mut output = String::new();
+    let mut output = "```\n".to_string(); //Monospace the whole output
     //Add user points to output
     for (points, userid) in points {
         let appendage = format!(
@@ -204,7 +204,7 @@ pub async fn show_points(
     }
 
     telegram
-        .send_message_silent(chatid, output)
+        .send_message_silently_with_markdown(chatid, format!("{}```", output))
         .await
         .map_err(|e| format!("sending disaster point count: {:?}", e))?;
 

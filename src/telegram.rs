@@ -184,6 +184,20 @@ impl Telegram {
         self.send_message_raw(json).await
     }
 
+    pub async fn send_message_silently_with_markdown(
+        &self,
+        chat_id: i64,
+        text: String,
+    ) -> Result<Message, ()> {
+        let json = serde_json::json!({
+            "text": text,
+            "chat_id": chat_id,
+            "disable_notification": true,
+            "parse_mode": "Markdown"
+        });
+        self.send_message_raw(json).await
+    }
+
     pub async fn reply_and_close_keyboard(
         &self,
         msg_id: u64,
