@@ -1,4 +1,4 @@
-SELECT userid, COUNT(message) as messages
+SELECT userid, COUNT(message) AS messages
   FROM MessageLogs
  WHERE chatid = ?
  GROUP BY userid

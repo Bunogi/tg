@@ -12,6 +12,8 @@ use cairo::Format;
 use chrono::{prelude::*, NaiveDateTime, Utc};
 use libc::c_int;
 use markov::Chain;
+use std::collections::HashMap;
+use unicode_segmentation::UnicodeSegmentation;
 
 pub mod disaster;
 
@@ -680,6 +682,99 @@ async fn wordcount(
         .map_err(|e| format!("sending word count message: {:?}", e))
 }
 
+async fn charcount(chatid: i64, telegram: &Telegram, context: &Context) -> Result<(), String> {
+    let conn = context.db_pool.get().await;
+    let messages: Vec<(i64, String)> = conn
+        .prepare_cached(include_sql!("getmessagebyuser.sql"))
+        .unwrap()
+        .query_map(params![chatid], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<(i64, String)>, rusqlite::Error>>()
+        .map_err(|e| format!("getting messages and userid: {:?}", e))?;
+
+    if messages.is_empty() {
+        return telegram
+            .send_message_silent(
+                chatid,
+                format!("There are no messages logged in this chat!"),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("sending no logged messages error: {:?}", e));
+    }
+
+    //Userid, char count
+    let mut char_counts: HashMap<i64, i64> = HashMap::new();
+    for (userid, message) in messages {
+        for grapheme in message.graphemes(true) {
+            //Ignore whitespace
+            if !grapheme.trim().is_empty() {
+                let counter = char_counts.entry(userid).or_insert(0);
+                *counter += 1;
+            }
+        }
+    }
+
+    let mut sorted: Vec<(i64, i64)> = char_counts.into_iter().collect();
+    sorted.sort_unstable_by_key(|x| -x.1); //Sorting by the negative puts the largest numbers first
+    let mut sorted = sorted.into_iter();
+    let first = sorted.next().unwrap();
+
+    let mut redis = context.redis_pool.get().await;
+
+    macro_rules! get_user_msgcount {
+        ($userid:expr) => {
+            conn.query_row(
+                include_sql!("getusermessagecount.sql"),
+                params![chatid, $userid],
+                |row| Ok(row.get(0)?),
+            )
+            .unwrap()
+        };
+    }
+
+    let msgcount: i64 = get_user_msgcount!(first.0);
+
+    let mut averages = Vec::new();
+    let first_user = get_user(chatid, first.0, telegram, &context.config, &mut redis)
+        .await
+        .to_string();
+    let mut output = format!(
+        "```\n{} has flooded the most with {} characters sent in {} messages!\n",
+        first_user, first.1, msgcount
+    );
+
+    averages.push((first_user, first.1 as f32 / msgcount as f32));
+
+    for (userid, chars) in sorted {
+        let msgcount: i64 = get_user_msgcount!(userid);
+        let user = get_user(chatid, userid, telegram, &context.config, &mut redis)
+            .await
+            .to_string();
+        output += &format!("{}: {} ({})\n", &user, chars, msgcount);
+        averages.push((user, chars as f32 / msgcount as f32));
+    }
+
+    //comparing b to a will cause the sort to go from high->low
+    averages.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    let mut averages = averages.into_iter();
+    let first = averages.next().unwrap();
+    output += &format!(
+        "{} is the most literate, sending an average of {:.2} chars per message!\n",
+        first.0, first.1
+    );
+    for (user, avg) in averages {
+        output += &format!("{}: {:.2}\n", user, avg);
+    }
+    output += "```";
+
+    telegram
+        .send_message_silently_with_markdown(chatid, output)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("sending char count message: {:?}", e))
+}
+
 fn get_order(from: Option<&String>, context: &Context) -> Result<usize, String> {
     if let Ok(n) = from
         .unwrap_or(&context.config.markov.chain_order.to_string())
@@ -734,6 +829,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                         .map_err(|e| format!("sending invalid user message: {:?}", e)),
                 }
             } else {
+                //Build keyboard
                 let users = context.db_pool.get().await
                     .prepare_cached(include_sql!("getchatusers.sql"))
                     .unwrap()
@@ -813,6 +909,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                 .map(|_| ())
                 .map_err(|e| format!("sending invalid order message: {:?}", e)),
         },
+        "/charcount" => charcount(msg.chat.id, telegram, context).await,
         "/wordcount" => match split.len() {
             1 => wordcount_graph(&msg, telegram, context).await,
             2 => wordcount(&split[1], &msg.chat, telegram, context).await,

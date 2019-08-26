@@ -156,8 +156,8 @@ pub async fn show_points(
 
     let mut redis = context.redis_pool.get().await;
     let mut output = "```\n".to_string(); //Monospace the whole output
-    //Add user points to output
     for (points, userid) in points {
+        //Add user points to output
         let appendage = format!(
             "{}: {}\n",
             crate::util::get_user(chatid, userid, telegram, &context.config, &mut redis).await,
