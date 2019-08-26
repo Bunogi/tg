@@ -141,3 +141,38 @@ pub async fn calculate_sticker_hash(
         }
     }
 }
+
+//Align a each line after a symbol
+pub fn align_text_after(symbol: char, text: String) -> String {
+    let mut left_len = 0; //Length needed on left side
+    let mut right_len = 0; //length needed on right
+
+    let mut pairs = Vec::new();
+    let lines = text.split("\n");
+    for l in lines {
+        if l.is_empty() {
+            continue;
+        }
+        let found_index = l.find(symbol).unwrap() + 1; // Ensure symbol goes to lhs
+        let (lhs, rhs) = l.split_at(found_index);
+        if left_len < found_index {
+            left_len = found_index;
+        }
+        if right_len < rhs.len() {
+            right_len = rhs.len();
+        }
+        pairs.push((lhs, rhs));
+    }
+
+    let mut output = String::new();
+    for (lhs, rhs) in pairs {
+        output += &format!(
+            "{:lwidth$}{:>rwidth$}\n",
+            lhs,
+            rhs,
+            lwidth = left_len,
+            rwidth = right_len
+        );
+    }
+    output
+}

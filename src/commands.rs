@@ -5,7 +5,7 @@ use crate::{
         message::Message,
         Telegram,
     },
-    util::{get_user, get_user_id, parse_time, rgba_to_cairo},
+    util::{get_user, get_user_id, parse_time, rgba_to_cairo, align_text_after},
     Context,
 };
 use cairo::Format;
@@ -91,14 +91,17 @@ async fn leaderboards<'a>(
         reply += &appendage;
     }
 
+    //Stores text to be aligned later
+    let mut table = String::new();
     for m in messages {
         let appendage = format!(
             "{}: {} messages\n",
             get_user(chatid, m.0 as i64, telegram, &context.config, &mut redis).await,
             m.1
         );
-        reply += &appendage;
+        table += &appendage;
     }
+    reply += &align_text_after(':', table);
 
     // Edits
     let mut edits = edits.into_iter();
@@ -111,6 +114,7 @@ async fn leaderboards<'a>(
         );
         reply += &appendage;
     }
+    let mut table = String::new();
     for (user, percentage, count) in edits {
         let appendage = format!(
             "{}: {:.2}% ({})\n",
@@ -119,8 +123,9 @@ async fn leaderboards<'a>(
             count
         );
 
-        reply += &appendage;
+        table += &appendage;
     }
+    reply += &align_text_after(':', table);
     telegram
         .send_message_silently_with_markdown(chatid, format!("{}```", reply))
         .await
@@ -746,14 +751,16 @@ async fn charcount(chatid: i64, telegram: &Telegram, context: &Context) -> Resul
 
     averages.push((first_user, first.1 as f32 / msgcount as f32));
 
+    let mut table = String::new();
     for (userid, chars) in sorted {
         let msgcount: i64 = get_user_msgcount!(userid);
         let user = get_user(chatid, userid, telegram, &context.config, &mut redis)
             .await
             .to_string();
-        output += &format!("{}: {} ({})\n", &user, chars, msgcount);
+        table += &format!("{}: {} ({})\n", &user, chars, msgcount);
         averages.push((user, chars as f32 / msgcount as f32));
     }
+    output += &align_text_after(':', table);
 
     //comparing b to a will cause the sort to go from high->low
     averages.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
@@ -763,9 +770,11 @@ async fn charcount(chatid: i64, telegram: &Telegram, context: &Context) -> Resul
         "{} is the most literate, sending an average of {:.2} chars per message!\n",
         first.0, first.1
     );
+    let mut table = String::new();
     for (user, avg) in averages {
-        output += &format!("{}: {:.2}\n", user, avg);
+        table += &format!("{}: {:.2}\n", user, avg);
     }
+    output += &align_text_after(':', table); //output of align will end with newline
     output += "```";
 
     telegram
