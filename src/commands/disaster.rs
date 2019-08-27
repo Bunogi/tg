@@ -1,6 +1,6 @@
 use crate::{
     include_sql,
-    telegram::{message::Message, Telegram},
+    telegram::{Telegram},
     Context,
 };
 use chrono::prelude::*;
@@ -15,28 +15,25 @@ struct LastDisaster {
 }
 
 pub async fn add_point(
-    userid: i64,
-    message: &Message,
+    receiverid: i64,
+    giverid: u64,
+    chatid: i64,
+    messageid: u64,
+    timestamp: u64,
     telegram: &Telegram,
     context: &Context,
 ) -> Result<(), String> {
-    if message.from.id as i64 == userid {
+    if giverid as i64 == receiverid {
         return telegram
-            .send_message_silent(
-                message.chat.id,
-                "Cannot give a disaster point to yourself!".into(),
-            )
+            .send_message_silent(chatid, "Cannot give a disaster point to yourself!".into())
             .await
             .map(|_| ())
-            .map_err(|e| format!("sending error message: {:?}", e));
+            .map_err(|e| format!("sending error message: {}", e));
     }
 
     //Check if the user is on cooldown for giving a point
     let mut redis = context.redis_pool.get().await;
-    let cooldown_key = format!(
-        "tg.disastercooldown.{}.{}",
-        message.chat.id, message.from.id
-    );
+    let cooldown_key = format!("tg.disastercooldown.{}.{}", chatid, giverid);
     let status = redis
         .get(&cooldown_key)
         .await
@@ -53,8 +50,8 @@ pub async fn add_point(
 
         return telegram
             .reply_and_close_keyboard(
-                message.id,
-                message.chat.id,
+                messageid,
+                chatid,
                 format!(
                     "You can give a new disaster point in {:0.1} hours",
                     crate::util::seconds_to_hours(ttl as i32)
@@ -62,22 +59,22 @@ pub async fn add_point(
             )
             .await
             .map(|_| ())
-            .map_err(|e| format!("sending error message: {:?}", e));
+            .map_err(|e| format!("sending error message: {}", e));
     }
 
     let conn = context.db_pool.get().await;
     conn.execute(
         include_sql!("disaster/addpoint.sql"),
-        params![message.chat.id, userid],
+        params![chatid, receiverid],
     )
-    .map_err(|e| format!("adding a point: {:?}", e))?;
+    .map_err(|e| format!("adding a disaster point: {:?}", e))?;
 
     //Update last disaster points given list in redis and set cooldown using a pipeline
-    let last_disaster_key = format!("tg.lastdisasterpoints.{}", message.chat.id).into_bytes();
+    let last_disaster_key = format!("tg.lastdisasterpoints.{}", messageid).into_bytes();
     let last_disaster = rmp_serde::to_vec(&LastDisaster {
-        from: message.from.id as i64,
-        to: userid,
-        utc: message.date as i64,
+        from: giverid as i64,
+        to: receiverid,
+        utc: timestamp as i64,
     })
     .unwrap();
     let timeout = (context.config.disaster.cooldown * 3600).to_string();
@@ -104,30 +101,24 @@ pub async fn add_point(
     let points: isize = conn
         .query_row(
             include_sql!("disaster/getuserpoints.sql"),
-            params![message.chat.id, userid],
+            params![chatid, receiverid],
             |row| Ok(row.get(0)?),
         )
         .map_err(|e| format!("getting user points: {:?}", e))?;
 
     telegram
         .reply_and_close_keyboard(
-            message.id,
-            message.chat.id,
+            messageid,
+            chatid,
             format!(
                 "{} now has {} disaster points.",
-                crate::util::get_user(
-                    message.chat.id,
-                    userid,
-                    telegram,
-                    &context.config,
-                    &mut redis
-                )
-                .await,
+                crate::util::get_user(chatid, receiverid, telegram, &context.config, &mut redis)
+                    .await,
                 points
             ),
         )
         .await
-        .map_err(|e| format!("sending disaster point count: {:?}", e))?;
+        .map_err(|e| format!("sending disaster point count: {}", e))?;
 
     Ok(())
 }
@@ -151,7 +142,7 @@ pub async fn show_points(
             .send_message_silent(chatid, "No points have been given yet".into())
             .await
             .map(|_| ())
-            .map_err(|e| format!("sending no points message: {:?}", e));
+            .map_err(|e| format!("sending no points message: {}", e));
     }
 
     let mut redis = context.redis_pool.get().await;
@@ -206,7 +197,7 @@ pub async fn show_points(
     telegram
         .send_message_silently_with_markdown(chatid, format!("{}```", output))
         .await
-        .map_err(|e| format!("sending disaster point count: {:?}", e))?;
+        .map_err(|e| format!("sending disaster point count: {}", e))?;
 
     Ok(())
 }

@@ -51,7 +51,7 @@ async fn leaderboards<'a>(
             .send_message_silent(chatid, "Error: No logged messages in this chat".into())
             .await
             .map(|_| ())
-            .map_err(|e| format!("sending no messages exist message: {:?}", e));
+            .map_err(|e| format!("sending no messages exist message: {}", e));
     }
 
     let (total_msgs, since): (isize, isize) = conn
@@ -132,7 +132,7 @@ async fn leaderboards<'a>(
         .send_message_silently_with_markdown(chatid, format!("{}```", reply))
         .await
         .map(|_| ())
-        .map_err(|e| format!("sending message: {:?}", e))
+        .map_err(|e| format!("sending leaderboards message: {}", e))
 }
 
 pub async fn stickerlog<'a>(
@@ -147,7 +147,7 @@ pub async fn stickerlog<'a>(
             telegram
                 .send_message_silent(msg.chat.id, "Invalid time string".to_string())
                 .await
-                .map_err(|e| format!("sending error message: {:?}", e))?;
+                .map_err(|e| format!("sending error message: {}", e))?;
             return Ok(());
         }
         let from_time: DateTime<Utc> = match parsed_time {
@@ -184,7 +184,7 @@ pub async fn stickerlog<'a>(
                     ),
                 )
                 .await
-                .map_err(|e| format!("sending error message: {:?}", e))?;
+                .map_err(|e| format!("sending error message: {}", e))?;
 
             return Ok(());
         }
@@ -225,7 +225,7 @@ pub async fn stickerlog<'a>(
             let image = telegram
                 .download_file(&mut redis, &f)
                 .await
-                .map_err(|e| format!("downloading file {}: {:?}", f, e))?;
+                .map_err(|e| format!("downloading file {}: {}", f, e))?;
             images.push(image);
         }
         (caption, images, usages)
@@ -337,7 +337,7 @@ pub async fn stickerlog<'a>(
         .send_png_lossless(msg.chat.id, rendered_image, Some(caption), true)
         .await
         .map(|_| ())
-        .map_err(|e| format!("sending image: {:?}", e))
+        .map_err(|e| format!("sending image: {}", e))
 }
 
 struct MessageData {
@@ -405,7 +405,7 @@ async fn simulate_chat(
                     .send_message_silent(chat.id, "Error: No logged messages in this chat".into())
                     .await
                     .map(|_| ())
-                    .map_err(|e| format!("sending no messages exist message: {:?}", e));
+                    .map_err(|e| format!("sending no messages exist message: {}", e));
             }
 
             let mut i = 0;
@@ -438,7 +438,7 @@ async fn simulate_chat(
         .send_message_silent(chat.id, output)
         .await
         .map(|_| ())
-        .map_err(|e| format!("sending simulated string: {:?}", e))
+        .map_err(|e| format!("sending simulated string: {}", e))
 }
 
 pub async fn simulate(
@@ -487,7 +487,7 @@ pub async fn simulate(
                     )
                     .await
                     .map(|_| ())
-                    .map_err(|e| format!("sending no messages exist message: {:?}", e));
+                    .map_err(|e| format!("sending no messages exist message: {}", e));
             }
 
             let mut i = 0;
@@ -528,7 +528,7 @@ pub async fn simulate(
         .reply_and_close_keyboard(command_message_id, chatid, output)
         .await
         .map(|_| ())
-        .map_err(|e| format!("sending simulated string: {:?}", e))
+        .map_err(|e| format!("sending simulated string: {}", e))
 }
 
 pub async fn quote(
@@ -566,7 +566,7 @@ pub async fn quote(
         )
         .await
         .map(|_| ())
-        .map_err(|e| format!("sending qoute: {:?}", e))
+        .map_err(|e| format!("sending qoute: {}", e))
 }
 
 async fn wordcount_graph(
@@ -594,7 +594,7 @@ async fn wordcount_graph(
             )
             .await
             .map(|_| ())
-            .map_err(|_| "sending log error message".to_string())
+            .map_err(|e| format!("sending log error message: {}", e))
     } else {
         //Initialize image with some constants
         let padding = 20.0;
@@ -686,7 +686,7 @@ async fn wordcount(
         )
         .await
         .map(|_| ())
-        .map_err(|e| format!("sending word count message: {:?}", e))
+        .map_err(|e| format!("sending word count message: {}", e))
 }
 
 async fn charcount(chatid: i64, telegram: &Telegram, context: &Context) -> Result<(), String> {
@@ -703,11 +703,11 @@ async fn charcount(chatid: i64, telegram: &Telegram, context: &Context) -> Resul
         return telegram
             .send_message_silent(
                 chatid,
-                format!("There are no messages logged in this chat!"),
+                "There are no messages logged in this chat!".to_string(),
             )
             .await
             .map(|_| ())
-            .map_err(|e| format!("sending no logged messages error: {:?}", e));
+            .map_err(|e| format!("sending no logged messages error: {}", e));
     }
 
     //Userid, char count
@@ -783,7 +783,7 @@ async fn charcount(chatid: i64, telegram: &Telegram, context: &Context) -> Resul
         .send_message_silently_with_markdown(chatid, output)
         .await
         .map(|_| ())
-        .map_err(|e| format!("sending char count message: {:?}", e))
+        .map_err(|e| format!("sending char count message: {}", e))
 }
 
 fn get_order(from: Option<&String>, context: &Context) -> Result<usize, String> {
@@ -857,7 +857,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                         )
                         .await
                         .map(|_| ())
-                        .map_err(|e| format!("sending invalid user message: {:?}", e)),
+                        .map_err(|e| format!("sending invalid user message: {}", e)),
                 }
             } else {
                 //Build keyboard
@@ -904,7 +904,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                         })
                     )
                     .await
-                    .map_err(|e| format!("sending select user message: {:?}", e)).unwrap();
+                    .map_err(|e| format!("sending select user message: {}", e)).unwrap();
 
                 let reply_command = ReplyCommand {
                     command_message_id: msg.id,
@@ -935,7 +935,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                 .send_message_silent(msg.chat.id, e)
                 .await
                 .map(|_| ())
-                .map_err(|e| format!("sending invalid order message: {:?}", e)),
+                .map_err(|e| format!("sending invalid order message: {}", e)),
         },
         "/simulatechat" => match get_order(split.get(1), context) {
             Ok(n) => simulate_chat(n, &msg.chat, telegram, context).await,
@@ -943,7 +943,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                 .send_message_silent(msg.chat.id, e)
                 .await
                 .map(|_| ())
-                .map_err(|e| format!("sending invalid order message: {:?}", e)),
+                .map_err(|e| format!("sending invalid order message: {}", e)),
         },
         "/charcount" => charcount(msg.chat.id, telegram, context).await,
         "/wordcount" => match split.len() {
@@ -953,13 +953,13 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                 .send_message_silent(msg.chat.id, "Invalid number of arguments".to_string())
                 .await
                 .map(|_| ())
-                .map_err(|e| format!("sending invalid argument message: {:?}", e)),
+                .map_err(|e| format!("sending invalid argument message: {}", e)),
         },
         "/disaster" => {
             use disaster::add_point;
             with_user!(
                 ReplyAction::AddDisasterPoint,
-                add_point(_, &msg, telegram, context)
+                add_point(_, msg.from.id, msg.chat.id, msg.id, msg.date, telegram, context)
             )
         }
         "/disasterpoints" => disaster::show_points(msg.chat.id, telegram, context).await,
@@ -971,7 +971,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                     .send_message_silent(msg.chat.id, "No such command".to_string())
                     .await
                     .map(|_| ())
-                    .map_err(|e| format!("sending no such command message: {:?}", e))
+                    .map_err(|e| format!("sending no such command message: {}", e))
             } else {
                 Ok(())
             }
@@ -980,12 +980,12 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
 
     if let Err(e) = res {
         error!("Command '{}' failed at '{}'", &root[1..], e);
-        telegram
+        //If this causes an error something bad must have happened
+        let _ = telegram
             .send_message_silent(
                 msg.chat.id,
                 "Fatal error occurred in command, see bot log".into(),
             )
-            .await
-            .unwrap();
+            .await;
     }
 }

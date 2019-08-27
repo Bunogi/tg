@@ -85,6 +85,13 @@ pub struct Telegram {
     token: String,
 }
 
+#[derive(Deserialize)]
+struct Response<T> {
+    result: Option<T>,
+    ok: bool,
+    description: Option<String>,
+}
+
 impl Telegram {
     pub async fn new(token: String) -> Self {
         //Get the bot user info
@@ -138,27 +145,33 @@ impl Telegram {
         Url::parse(&format!("{}/{}", self.base_url, endpoint)).unwrap()
     }
 
-    async fn send_message_raw(&self, serialized: serde_json::Value) -> Result<Message, ()> {
+    async fn send_message_raw(&self, serialized: serde_json::Value) -> Result<Message, String> {
         let url = self.get_url("sendMessage");
 
-        #[derive(Deserialize)]
-        struct Response {
-            result: ApiMessage,
-        };
-
-        self.client
+        let reply = self
+            .client
             .get(url)
             .json(&serialized)
             .send()
             .and_then(|response| response.into_body().concat2())
-            .map(|f| serde_json::from_slice(&f).unwrap())
-            .map_err(|_| ())
-            .map(|m: Response| m.result.into())
             .compat()
-            .await
+            .await;
+
+        let res: Response<ApiMessage> = serde_json::from_slice(&reply.unwrap()).unwrap();
+
+        if res.ok {
+            Ok(res.result.unwrap().into())
+        } else {
+            Err(res.description.unwrap())
+        }
     }
 
-    pub async fn reply_to(&self, msg_id: u64, chat_id: i64, text: String) -> Result<Message, ()> {
+    pub async fn reply_to(
+        &self,
+        msg_id: u64,
+        chat_id: i64,
+        text: String,
+    ) -> Result<Message, String> {
         let json = serde_json::json!({
             "reply_to_message_id": msg_id,
             "chat_id": chat_id,
@@ -173,7 +186,7 @@ impl Telegram {
         chat_id: i64,
         text: String,
         markup: serde_json::Value,
-    ) -> Result<Message, ()> {
+    ) -> Result<Message, String> {
         let json = serde_json::json!({
             "reply_to_message_id": msg_id,
             "chat_id": chat_id,
@@ -188,7 +201,7 @@ impl Telegram {
         &self,
         chat_id: i64,
         text: String,
-    ) -> Result<Message, ()> {
+    ) -> Result<Message, String> {
         let json = serde_json::json!({
             "text": text,
             "chat_id": chat_id,
@@ -203,7 +216,7 @@ impl Telegram {
         msg_id: u64,
         chat_id: i64,
         text: String,
-    ) -> Result<Message, ()> {
+    ) -> Result<Message, String> {
         let json = serde_json::json!({
             "reply_to_message_id": msg_id,
             "chat_id": chat_id,
@@ -217,7 +230,7 @@ impl Telegram {
         self.send_message_raw(json).await
     }
 
-    pub async fn send_message_silent(&self, chat_id: i64, text: String) -> Result<Message, ()> {
+    pub async fn send_message_silent(&self, chat_id: i64, text: String) -> Result<Message, String> {
         let json = serde_json::json!({
             "chat_id": chat_id,
             "text": text,
@@ -238,65 +251,66 @@ impl Telegram {
         &self,
         redis: &mut darkredis::Connection,
         file_id: &str,
-    ) -> Result<Vec<u8>, ()> {
+    ) -> Result<Vec<u8>, String> {
         let key = format!("tg.download.{}", file_id);
         match redis.get(&key).await {
             Ok(Some(f)) => Ok(f),
             Ok(None) => {
                 info!("Downloading file {} from Telegram...", file_id);
-                #[derive(Deserialize)]
-                struct File {
-                    file_path: String,
-                }
-                #[derive(Deserialize)]
-                struct FileResp {
-                    result: File,
-                }
 
                 let get_file = self.get_url("getFile");
                 let json = serde_json::json!({ "file_id": file_id });
-                let file_path = self
+                let reply = self
                     .client
                     .get(get_file)
                     .json(&json)
                     .send()
                     .and_then(|response| response.into_body().concat2())
-                    .map(|f| serde_json::from_slice(&f).unwrap())
-                    .map(|m: FileResp| m.result.file_path)
-                    .map_err(|e| error!("Failed to get download link for {}: {:?}", file_id, &e))
                     .compat()
-                    .await?;
+                    .await
+                    .unwrap();
 
-                let file: Vec<u8> = self
-                    .client
-                    .get(
-                        Url::parse(&format!(
-                            "https://api.telegram.org/file/bot{}/{}",
-                            self.token, file_path
-                        ))
-                        .unwrap(),
-                    )
-                    .send()
-                    .and_then(|response| response.into_body().concat2())
-                    .map(|f| f.iter().cloned().collect::<Vec<u8>>())
-                    .map_err(|e| error!("Failed to download {}: {:?}", file_id, &e))
-                    .compat()
-                    .await?;
+                #[derive(Deserialize)]
+                struct File {
+                    file_path: String,
+                }
+                let file_path: Response<File> = serde_json::from_slice(&reply).unwrap();
+                if file_path.ok {
+                    let file: Vec<u8> = self
+                        .client
+                        .get(
+                            Url::parse(&format!(
+                                "https://api.telegram.org/file/bot{}/{}",
+                                self.token,
+                                file_path.result.unwrap().file_path
+                            ))
+                            .unwrap(),
+                        )
+                        .send()
+                        .and_then(|response| response.into_body().concat2())
+                        .map(|f| f.iter().cloned().collect::<Vec<u8>>())
+                        .map_err(|e| format!("Failed to download {}: {:?}", file_id, &e))
+                        .compat()
+                        .await?;
 
-                redis
-                    .set(&key, &file)
-                    .map_err(|e| error!("Couldn't set key {}: {:?}", key, e))
-                    .await?;
+                    redis
+                        .set(&key, &file)
+                        .map_err(|e| format!("Couldn't set key {}: {:?}", key, e))
+                        .await?;
 
-                Ok(file)
+                    Ok(file)
+                } else {
+                    Err(format!(
+                        "couldn't get download link for {}: {}",
+                        file_id,
+                        file_path.description.unwrap()
+                    ))
+                }
             }
-            Err(e) => {
-                error!(
-                    "Failed to get possibly predownloaded file {}: {}",
-                    file_id, e
-                );
-                Err(())
-            }
+            Err(e) => Err(format!(
+                "Failed to get possibly predownloaded file {}: {}",
+                file_id, e
+            )),
         }
     }
 
@@ -347,7 +361,7 @@ impl Telegram {
         data: Vec<u8>,
         caption: Option<String>,
         silent: bool,
-    ) -> Result<Message, ()> {
+    ) -> Result<Message, String> {
         let url = self.get_url("sendDocument");
         let form = multipart::Form::new()
             .part(
@@ -366,21 +380,23 @@ impl Telegram {
             form
         };
 
-        #[derive(Deserialize)]
-        struct Response {
-            result: ApiMessage,
-        }
-
-        self.client
+        let reply = self
+            .client
             .post(url)
             .multipart(form)
             .send()
             .and_then(|response| response.into_body().concat2())
-            .map(|f| serde_json::from_slice(&f).unwrap())
-            .map(|u: Response| u.result.into())
-            .map_err(|e| error!("Getting telegram response: {:?}", e))
             .compat()
             .await
+            .unwrap();
+
+        let res: Response<ApiMessage> = serde_json::from_slice(&reply).unwrap();
+
+        if res.ok {
+            Ok(res.result.unwrap().into())
+        } else {
+            Err(res.description.unwrap())
+        }
     }
 
     pub async fn get_chat_member(&self, chat_id: i64, user_id: i64) -> Result<User, ()> {
@@ -413,19 +429,14 @@ impl Telegram {
     }
 
     pub async fn delete_message(&self, chat_id: i64, message_id: u64) {
-        #[derive(Deserialize)]
-        struct Response {
-            ok: bool,
-            description: Option<String>,
-        }
-
         let url = self.get_url("deleteMessage");
         let json = serde_json::json!({
             "chat_id": chat_id,
             "message_id": message_id
         });
 
-        let result = self.client
+        let result = self
+            .client
             .get(url)
             .json(&json)
             .send()
@@ -433,9 +444,14 @@ impl Telegram {
             .compat()
             .await;
 
-        let res: Response = serde_json::from_slice(&result.unwrap()).unwrap();
+        let res: Response<bool> = serde_json::from_slice(&result.unwrap()).unwrap();
         if !res.ok {
-            error!("Couldn't delete message {} in chat {}: \"{}\"", message_id, chat_id, res.description.unwrap());
+            error!(
+                "Couldn't delete message {} in chat {}: \"{}\"",
+                message_id,
+                chat_id,
+                res.description.unwrap()
+            );
         }
     }
 }

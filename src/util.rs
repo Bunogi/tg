@@ -148,7 +148,7 @@ pub fn align_text_after(symbol: char, text: String) -> String {
     let mut right_len = 0; //length needed on right
 
     let mut pairs = Vec::new();
-    let lines = text.split("\n");
+    let lines = text.split('\n');
     for l in lines {
         if l.is_empty() {
             continue;

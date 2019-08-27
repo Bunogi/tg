@@ -121,7 +121,7 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
                                     )
                                     .await
                                     .map_err(|e| {
-                                        error!("failed to quote from reply message: {:?}", e)
+                                        error!("failed to quote from reply message: {}", e)
                                     });
                                 }
                                 commands::ReplyAction::Simulate => {
@@ -135,28 +135,33 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
                                     )
                                     .await
                                     .map_err(|e| {
-                                        error!("failed to simulate from reply message: {:?}", e)
+                                        error!("failed to simulate from reply message: {}", e)
                                     });
                                 }
                                 commands::ReplyAction::AddDisasterPoint => {
                                     let _ = crate::commands::disaster::add_point(
                                         userid,
-                                        &msg,
+                                        msg.from.id,
+                                        msg.chat.id,
+                                        command.command_message_id,
+                                        msg.date,
                                         telegram,
-                                        context
+                                        context,
                                     )
-                                        .await
-                                        .map_err(|e| {
-                                            error!("failed to add a disaster point from reply message: {:?}", e)
-                                        });
+                                    .await
+                                    .map_err(|e| {
+                                        error!(
+                                            "failed to add a disaster point from reply message: {}",
+                                            e
+                                        )
+                                    });
                                 }
                             }
                             futures::future::join(
-                                telegram.delete_message(
-                                    msg.chat.id, msg.id
-                                ),
-                                telegram.delete_message(msg.chat.id, other_message.id)
-                            ).await;
+                                telegram.delete_message(msg.chat.id, msg.id),
+                                telegram.delete_message(msg.chat.id, other_message.id),
+                            )
+                            .await;
                         }
                     }
                     Ok(None) => (),

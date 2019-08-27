@@ -1,5 +1,3 @@
-#![feature(async_await, unsized_locals)]
-
 #[macro_use]
 extern crate log;
 #[macro_use]
