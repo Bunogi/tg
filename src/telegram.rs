@@ -411,4 +411,31 @@ impl Telegram {
             .compat()
             .await
     }
+
+    pub async fn delete_message(&self, chat_id: i64, message_id: u64) {
+        #[derive(Deserialize)]
+        struct Response {
+            ok: bool,
+            description: Option<String>,
+        }
+
+        let url = self.get_url("deleteMessage");
+        let json = serde_json::json!({
+            "chat_id": chat_id,
+            "message_id": message_id
+        });
+
+        let result = self.client
+            .get(url)
+            .json(&json)
+            .send()
+            .and_then(|response| response.into_body().concat2())
+            .compat()
+            .await;
+
+        let res: Response = serde_json::from_slice(&result.unwrap()).unwrap();
+        if !res.ok {
+            error!("Couldn't delete message {} in chat {}: \"{}\"", message_id, chat_id, res.description.unwrap());
+        }
+    }
 }

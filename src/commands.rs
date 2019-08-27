@@ -5,14 +5,16 @@ use crate::{
         message::Message,
         Telegram,
     },
-    util::{get_user, get_user_id, parse_time, rgba_to_cairo, align_text_after},
+    util::{align_text_after, get_user, get_user_id, parse_time, rgba_to_cairo},
     Context,
 };
 use cairo::Format;
 use chrono::{prelude::*, NaiveDateTime, Utc};
 use libc::c_int;
 use markov::Chain;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub mod disaster;
@@ -804,9 +806,29 @@ fn get_order(from: Option<&String>, context: &Context) -> Result<usize, String> 
 
 //Action constants used in the get_user macro for commands which can take a reply.
 //A small optimization could be to split these into a human readable and a redis format by using an enum type or something
-pub const ACTION_SIMULATE: &str = "simulate";
-pub const ACTION_QUOTE: &str = "quote";
-pub const ACTION_ADD_DISASTER_POINT: &str = "give a disaster point";
+
+#[derive(Serialize, Deserialize)]
+pub enum ReplyAction {
+    Simulate,
+    Quote,
+    AddDisasterPoint,
+}
+
+impl fmt::Display for ReplyAction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Simulate => write!(f, "simulate"),
+            Self::Quote => write!(f, "quote"),
+            Self::AddDisasterPoint => write!(f, "give a disaster point"),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ReplyCommand {
+    pub command_message_id: u64, // Original command message which is missing a user
+    pub action: ReplyAction,
+}
 
 pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, context: &Context) {
     let split: Vec<String> = msg_text.split_whitespace().map(|s| s.into()).collect();
@@ -822,7 +844,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
 
     //Macro for extracting user name and asking for a user using a keyboard if none is given
     macro_rules! with_user {
-        ($action:ident, $fun:ident ( _, $( $arg:expr ),* ) ) => {
+        ($action:expr, $fun:ident ( _, $( $arg:expr ),* ) ) => {
             if split.len() >= 2 {
                 match get_user_id(msg.chat.id, &split[1], &context.db_pool).await {
                     Some(u) => {
@@ -871,7 +893,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                     buttons.push(row);
                 }
 
-                let reply_message = telegram
+                let request_message = telegram
                     .reply_with_markup(
                         msg.id,
                         msg.chat.id,
@@ -884,11 +906,16 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                     .await
                     .map_err(|e| format!("sending select user message: {:?}", e)).unwrap();
 
+                let reply_command = ReplyCommand {
+                    command_message_id: msg.id,
+                    action: $action
+                };
+
                 let mut redis = context.redis_pool.get().await;
 
-                let key = format!("tg.replycommand.{}.{}", msg.chat.id, reply_message.id);
+                let key = format!("tg.replycommand.{}.{}", msg.chat.id, request_message.id);
                 redis
-                    .set_with_expiry(&key, $action, std::time::Duration::new(3600 * 24, 0))
+                    .set_with_expiry(&key, rmp_serde::to_vec(&reply_command).unwrap(), std::time::Duration::new(3600 * 24, 0))
                     .await
                     .unwrap();
 
@@ -901,9 +928,9 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
     let res = match root {
         "/leaderboards" => leaderboards(msg.chat.id, telegram, context).await,
         "/stickerlog" => stickerlog(msg, &split, telegram, context).await,
-        "/quote" => with_user!(ACTION_QUOTE, quote(_, msg.chat.id, msg.id, telegram,context)),
+        "/quote" => with_user!(ReplyAction::Quote, quote(_, msg.chat.id, msg.id, telegram,context)),
         "/simulate" => match get_order(split.get(2), context) {
-            Ok(n) => with_user!(ACTION_SIMULATE, simulate(_, msg.chat.id, n, msg.id, telegram, context)),
+            Ok(n) => with_user!(ReplyAction::Simulate, simulate(_, msg.chat.id, n, msg.id, telegram, context)),
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)
                 .await
@@ -931,7 +958,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         "/disaster" => {
             use disaster::add_point;
             with_user!(
-                ACTION_ADD_DISASTER_POINT,
+                ReplyAction::AddDisasterPoint,
                 add_point(_, &msg, telegram, context)
             )
         }
