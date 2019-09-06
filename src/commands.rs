@@ -677,7 +677,7 @@ async fn wordcount(
             params![word, chat.id],
             |row| row.get(1),
         )
-        .unwrap();
+        .unwrap_or(0);
 
     telegram
         .send_message_silent(
