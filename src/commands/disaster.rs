@@ -70,7 +70,7 @@ pub async fn add_point(
     .map_err(|e| format!("adding a disaster point: {:?}", e))?;
 
     //Update last disaster points given list in redis and set cooldown using a pipeline
-    let last_disaster_key = format!("tg.lastdisasterpoints.{}", messageid).into_bytes();
+    let last_disaster_key = format!("tg.lastdisasterpoints.{}", chatid).into_bytes();
     let last_disaster = rmp_serde::to_vec(&LastDisaster {
         from: giverid as i64,
         to: receiverid,
