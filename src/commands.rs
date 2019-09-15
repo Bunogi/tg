@@ -104,6 +104,7 @@ async fn leaderboards<'a>(
         table += &appendage;
     }
     reply += &align_text_after(':', table);
+    reply += "\n";
 
     // Edits
     let mut edits = edits.into_iter();
