@@ -53,7 +53,7 @@ impl<'a> UpdateStream<'a> {
             .send()
             .and_then(|response| response.into_body().concat2())
             .map(|f| serde_json::from_slice(&f).unwrap())
-            .map_err(|_| ())
+            .map_err(|e| error!("Failed to decode telegram update: {}", e))
             .compat()
             .boxed()
     }

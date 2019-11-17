@@ -117,7 +117,7 @@ impl Telegram {
             .unwrap();
 
         let bot_mention = format!("@{}", bot_user.username.as_ref().unwrap());
-        debug!("This bot is named {}", bot_mention);
+        info!("This bot is named {}", bot_mention);
 
         Self {
             client,
