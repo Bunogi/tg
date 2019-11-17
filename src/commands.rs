@@ -770,7 +770,7 @@ async fn charcount(chatid: i64, telegram: &Telegram, context: &Context) -> Resul
     let mut averages = averages.into_iter();
     let first = averages.next().unwrap();
     output += &format!(
-        "{} is the most literate, sending an average of {:.2} chars per message!\n",
+        "\n{} is the most literate, sending an average of {:.2} chars per message!\n",
         first.0, first.1
     );
     let mut table = String::new();
