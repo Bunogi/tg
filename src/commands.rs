@@ -418,11 +418,7 @@ async fn simulate_chat(
             //Cache for later
             let serialized = rmp_serde::to_vec(&chain).unwrap();
             redis
-                .set_with_expiry(
-                    &key,
-                    serialized,
-                    std::time::Duration::new(context.config.cache.markov_chain, 0),
-                )
+                .set_and_expire_seconds(&key, serialized, context.config.cache.markov_chain as u32)
                 .await
                 .unwrap();
             Ok(chain)
@@ -504,11 +500,7 @@ pub async fn simulate(
             //Cache for later
             let serialized = rmp_serde::to_vec(&chain).unwrap();
             redis
-                .set_with_expiry(
-                    &key,
-                    &serialized,
-                    std::time::Duration::new(context.config.cache.markov_chain, 0),
-                )
+                .set_and_expire_seconds(&key, &serialized, context.config.cache.markov_chain as u32)
                 .await
                 .unwrap();
             Ok(chain)
@@ -916,7 +908,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
 
                 let key = format!("tg.replycommand.{}.{}", msg.chat.id, request_message.id);
                 redis
-                    .set_with_expiry(&key, rmp_serde::to_vec(&reply_command).unwrap(), std::time::Duration::new(3600 * 24, 0))
+                    .set_and_expire_seconds(&key, rmp_serde::to_vec(&reply_command).unwrap(), 3600 * 24)
                     .await
                     .unwrap();
 
@@ -931,7 +923,9 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         "/stickerlog" => stickerlog(msg, &split, telegram, context).await,
         "/quote" => with_user!(ReplyAction::Quote, quote(_, msg.chat.id, msg.id, telegram,context)),
         "/simulate" => match get_order(split.get(2), context) {
-            Ok(n) => with_user!(ReplyAction::Simulate, simulate(_, msg.chat.id, n, msg.id, telegram, context)),
+            Ok(n) => {
+                with_user!(ReplyAction::Simulate, simulate(_, msg.chat.id, n, msg.id, telegram, context))
+            }
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)
                 .await

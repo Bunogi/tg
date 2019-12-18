@@ -21,11 +21,7 @@ pub async fn get_user(
             let user = telegram.get_chat_member(chat_id, user_id).await.unwrap();
             let serialized = rmp_serde::to_vec(&user).unwrap();
             redis
-                .set_with_expiry(
-                    &user_path,
-                    &serialized,
-                    std::time::Duration::new(config.cache.username, 0),
-                )
+                .set_and_expire_seconds(&user_path, &serialized, config.cache.username as u32)
                 .await
                 .unwrap();
             user
