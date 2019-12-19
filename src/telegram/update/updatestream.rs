@@ -1,12 +1,10 @@
 use super::{super::ApiUpdate, Update};
 use futures::{
-    compat::Future01CompatExt,
     future::Future,
     prelude::*,
     task::{Context, Poll},
 };
-use futures01::{Future as Future01, Stream as Stream01};
-use reqwest::{r#async::Client, Url};
+use reqwest::{Client, Url};
 use serde::Deserialize;
 use std::collections::VecDeque;
 use std::pin::Pin;
@@ -21,7 +19,7 @@ struct ApiResponse {
 pub struct UpdateStream<'a> {
     update_url: Url,
     client: &'a Client,
-    poll_future: Pin<Box<dyn Future<Output = Result<ApiResponse, ()>> + Send>>,
+    poll_future: Pin<Box<dyn Future<Output = Result<ApiResponse, ()>> + Send + 'a>>,
     poll_running: bool,
     cached_updates: VecDeque<ApiUpdate>,
     offset: u64,
@@ -29,33 +27,30 @@ pub struct UpdateStream<'a> {
 
 impl<'a> UpdateStream<'a> {
     pub fn new(client: &'a Client, update_url: Url) -> Self {
-        let poll_future = Self::get_poll_future(&client, &update_url, 0);
+        let poll_future = Self::get_poll_future(&client, update_url.clone(), 0).boxed();
+
         Self {
-            offset: 0,
+            offset: 1,
             update_url,
             client,
             poll_future,
-            poll_running: false,
+            poll_running: true,
             cached_updates: VecDeque::new(),
         }
     }
 
     //TODO return proper error type
     fn get_poll_future(
-        client: &Client,
-        url: &Url,
+        client: &'a Client,
+        url: Url,
         offset: u64,
-    ) -> Pin<Box<dyn Future<Output = Result<ApiResponse, ()>> + Send>> {
-        let json = serde_json::json!({"offset": offset, "timeout": 6000});
-        client
-            .get(url.clone())
-            .json(&json)
-            .send()
-            .and_then(|response| response.into_body().concat2())
-            .map(|f| serde_json::from_slice(&f).unwrap())
-            .map_err(|e| error!("Failed to decode telegram update: {}", e))
-            .compat()
-            .boxed()
+    ) -> impl Future<Output = Result<ApiResponse, ()>> + Send + 'a {
+        async move {
+            let json = serde_json::json!({"offset": offset, "timeout": 6000});
+            let response = client.get(url).json(&json).send().await.unwrap();
+
+            response.json::<ApiResponse>().map_err(|_| ()).await
+        }
     }
 }
 
@@ -70,7 +65,8 @@ impl Stream for UpdateStream<'_> {
 
         if !self.poll_running {
             self.poll_future =
-                Self::get_poll_future(&self.client, &self.update_url, self.offset + 1);
+                Self::get_poll_future(&self.client, self.update_url.clone(), self.offset + 1)
+                    .boxed();
             self.poll_running = true;
         }
 

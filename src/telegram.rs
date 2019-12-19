@@ -3,14 +3,9 @@ pub mod message;
 pub mod update;
 pub mod user;
 
-use futures::compat::*;
 use futures::prelude::*;
-use futures01::{future::Future as Future01, stream::Stream};
 use message::Message;
-use reqwest::{
-    r#async::{multipart, Client},
-    Url,
-};
+use reqwest::{multipart, Client, Url};
 use serde::Deserialize;
 use std::fmt;
 use update::UpdateStream;
@@ -76,7 +71,7 @@ struct ApiMessage {
     chat: ApiChat,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Telegram {
     client: Client,
     base_url: String,
@@ -93,7 +88,7 @@ struct Response<T> {
 }
 
 impl Telegram {
-    pub async fn new(token: String) -> Self {
+    pub async fn connect(token: String) -> Result<Self, String> {
         //Get the bot user info
         let client = Client::new();
         let base_url = format!("https://api.telegram.org/bot{}", token);
@@ -108,24 +103,23 @@ impl Telegram {
         let bot_user = client
             .get(url)
             .send()
-            .and_then(|response| response.into_body().concat2())
-            .map(|f| serde_json::from_slice(&f).unwrap())
-            .map(|json: Response| json.result)
-            .map_err(|_| ())
-            .compat()
             .await
-            .unwrap();
+            .map_err(|e| format!("sending bot request: {}", e))?
+            .json::<Response>()
+            .await
+            .map_err(|e| format!("deserializing response: {}", e))
+            .map(|json: Response| json.result)?;
 
         let bot_mention = format!("@{}", bot_user.username.as_ref().unwrap());
         info!("This bot is named {}", bot_mention);
 
-        Self {
+        Ok(Self {
             client,
             base_url,
             bot_user,
             bot_mention,
             token,
-        }
+        })
     }
 
     pub fn bot_mention(&self) -> &str {
@@ -153,8 +147,9 @@ impl Telegram {
             .get(url)
             .json(&serialized)
             .send()
-            .and_then(|response| response.into_body().concat2())
-            .compat()
+            .await
+            .map_err(|e| format!("posting message: {}", e))?
+            .bytes()
             .await;
 
         let res: Response<ApiMessage> = serde_json::from_slice(&reply.unwrap()).unwrap();
@@ -257,53 +252,53 @@ impl Telegram {
             Ok(Some(f)) => Ok(f),
             Ok(None) => {
                 info!("Downloading file {} from Telegram...", file_id);
-
-                let get_file = self.get_url("getFile");
-                let json = serde_json::json!({ "file_id": file_id });
-                let reply = self
-                    .client
-                    .get(get_file)
-                    .json(&json)
-                    .send()
-                    .and_then(|response| response.into_body().concat2())
-                    .compat()
-                    .await
-                    .unwrap();
-
                 #[derive(Deserialize)]
                 struct File {
                     file_path: String,
                 }
-                let file_path: Response<File> = serde_json::from_slice(&reply).unwrap();
-                if file_path.ok {
-                    let file: Vec<u8> = self
+
+                let get_file = self.get_url("getFile");
+                let json = serde_json::json!({ "file_id": file_id });
+                let file = self
+                    .client
+                    .get(get_file)
+                    .json(&json)
+                    .send()
+                    .await
+                    .unwrap()
+                    .json::<Response<File>>()
+                    .await
+                    .unwrap();
+
+                if file.ok {
+                    let file = self
                         .client
                         .get(
                             Url::parse(&format!(
                                 "https://api.telegram.org/file/bot{}/{}",
                                 self.token,
-                                file_path.result.unwrap().file_path
+                                file.result.unwrap().file_path
                             ))
                             .unwrap(),
                         )
                         .send()
-                        .and_then(|response| response.into_body().concat2())
-                        .map(|f| f.iter().cloned().collect::<Vec<u8>>())
-                        .map_err(|e| format!("Failed to download {}: {:?}", file_id, &e))
-                        .compat()
-                        .await?;
+                        .await
+                        .unwrap()
+                        .bytes()
+                        .await
+                        .map_err(|e| format!("Failed to download {}: {:?}", file_id, &e))?;
 
                     redis
                         .set(&key, &file)
                         .map_err(|e| format!("Couldn't set key {}: {:?}", key, e))
                         .await?;
 
-                    Ok(file)
+                    Ok(file.to_vec())
                 } else {
                     Err(format!(
                         "couldn't get download link for {}: {}",
                         file_id,
-                        file_path.description.unwrap()
+                        file.description.unwrap()
                     ))
                 }
             }
@@ -385,17 +380,16 @@ impl Telegram {
             .post(url)
             .multipart(form)
             .send()
-            .and_then(|response| response.into_body().concat2())
-            .compat()
+            .await
+            .unwrap()
+            .json::<Response<ApiMessage>>()
             .await
             .unwrap();
 
-        let res: Response<ApiMessage> = serde_json::from_slice(&reply).unwrap();
-
-        if res.ok {
-            Ok(res.result.unwrap().into())
+        if reply.ok {
+            Ok(reply.result.unwrap().into())
         } else {
-            Err(res.description.unwrap())
+            Err(reply.description.unwrap())
         }
     }
 
@@ -420,12 +414,12 @@ impl Telegram {
             .get(url)
             .json(&json)
             .send()
-            .and_then(|response| response.into_body().concat2())
-            .map(|f| serde_json::from_slice(&f).unwrap())
-            .map(|u: Response| u.result.user)
-            .map_err(|_| ())
-            .compat()
             .await
+            .unwrap()
+            .json::<Response>()
+            .await
+            .map(|u| u.result.user)
+            .map_err(|_| ())
     }
 
     pub async fn delete_message(&self, chat_id: i64, message_id: u64) {
@@ -440,17 +434,18 @@ impl Telegram {
             .get(url)
             .json(&json)
             .send()
-            .and_then(|response| response.into_body().concat2())
-            .compat()
-            .await;
+            .await
+            .unwrap()
+            .json::<Response<bool>>()
+            .await
+            .unwrap();
 
-        let res: Response<bool> = serde_json::from_slice(&result.unwrap()).unwrap();
-        if !res.ok {
+        if !result.ok {
             error!(
                 "Couldn't delete message {} in chat {}: \"{}\"",
                 message_id,
                 chat_id,
-                res.description.unwrap()
+                result.description.unwrap()
             );
         }
     }

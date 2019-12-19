@@ -67,7 +67,7 @@ pub struct Context {
     db_pool: SqlPool,
 }
 
-#[runtime::main(runtime_tokio::Tokio)]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init();
 
@@ -118,18 +118,24 @@ async fn main() -> std::io::Result<()> {
     }
 
     info!("Connecting to Telegram...");
-    let telegram = Telegram::new(std::env::var("TELEGRAM_BOT_TOKEN").unwrap()).await;
-    let context = Context {
-        config,
-        redis_pool,
-        db_pool,
-    };
+    let telegram = Telegram::connect(std::env::var("TELEGRAM_BOT_TOKEN").unwrap()).await;
+    if telegram.is_err() {
+        error!("Failed to connect to telegram: {}", telegram.unwrap_err());
+        exit(2);
+    } else {
+        let context = Context {
+            config,
+            redis_pool,
+            db_pool,
+        };
+        let telegram = telegram.unwrap();
 
-    loop {
-        info!("Listening to updates...");
-        telegram
-            .updates()
-            .for_each_concurrent(None, |f| handlers::handle_update(f, &telegram, &context))
-            .await;
+        loop {
+            info!("Listening to updates...");
+            telegram
+                .updates()
+                .for_each_concurrent(None, |f| handlers::handle_update(f, &telegram, &context))
+                .await;
+        }
     }
 }
