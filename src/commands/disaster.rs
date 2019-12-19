@@ -1,11 +1,8 @@
-use crate::{
-    include_sql,
-    telegram::{Telegram},
-    Context,
-};
+use crate::{include_sql, telegram::Telegram, Context};
 use chrono::prelude::*;
 use darkredis::{Command, CommandList, Value};
 use serde::{Deserialize, Serialize};
+use tokio::task;
 
 #[derive(Serialize, Deserialize)]
 struct LastDisaster {
@@ -63,11 +60,13 @@ pub async fn add_point(
     }
 
     let conn = context.db_pool.get().await;
-    conn.execute(
-        include_sql!("disaster/addpoint.sql"),
-        params![chatid, receiverid],
-    )
-    .map_err(|e| format!("adding a disaster point: {:?}", e))?;
+    task::block_in_place(|| {
+        conn.execute(
+            include_sql!("disaster/addpoint.sql"),
+            params![chatid, receiverid],
+        )
+        .map_err(|e| format!("adding a disaster point: {:?}", e))
+    })?;
 
     //Update last disaster points given list in redis and set cooldown using a pipeline
     let last_disaster_key = format!("tg.lastdisasterpoints.{}", chatid).into_bytes();
@@ -98,13 +97,14 @@ pub async fn add_point(
         .map_err(|e| format!("adding redis disaster data: {:?}", e))?;
 
     //Send the update status message
-    let points: isize = conn
-        .query_row(
+    let points: isize = task::block_in_place(|| {
+        conn.query_row(
             include_sql!("disaster/getuserpoints.sql"),
             params![chatid, receiverid],
             |row| Ok(row.get(0)?),
         )
-        .map_err(|e| format!("getting user points: {:?}", e))?;
+        .map_err(|e| format!("getting user points: {:?}", e))
+    })?;
 
     telegram
         .reply_and_close_keyboard(
@@ -129,13 +129,14 @@ pub async fn show_points(
     context: &Context,
 ) -> Result<(), String> {
     let conn = context.db_pool.get().await;
-    let points = conn
-        .prepare_cached(include_sql!("disaster/getchatpoints.sql"))
-        .unwrap()
-        .query_map(params![chatid], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .collect::<Result<Vec<(i32, i64)>, rusqlite::Error>>()
-        .map_err(|e| format!("getting chat points: {:?}", e))?;
+    let points = task::block_in_place(|| {
+        conn.prepare_cached(include_sql!("disaster/getchatpoints.sql"))
+            .unwrap()
+            .query_map(params![chatid], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<(i32, i64)>, rusqlite::Error>>()
+            .map_err(|e| format!("getting chat points: {:?}", e))
+    })?;
 
     if points.is_empty() {
         return telegram

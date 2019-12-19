@@ -15,6 +15,7 @@ use markov::Chain;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use tokio::task;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub mod disaster;
@@ -38,13 +39,14 @@ async fn leaderboards<'a>(
     context: &Context,
 ) -> Result<(), String> {
     let conn = context.db_pool.get().await;
-    let messages = conn
-        .prepare_cached(include_sql!("getmessages.sql"))
-        .unwrap()
-        .query_map(params![chatid], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .collect::<Result<Vec<(isize, isize)>, rusqlite::Error>>()
-        .map_err(|e| format!("getting messages: {:?}", e))?;
+    let messages = task::block_in_place(|| {
+        conn.prepare_cached(include_sql!("getmessages.sql"))
+            .unwrap()
+            .query_map(params![chatid], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<(isize, isize)>, rusqlite::Error>>()
+            .map_err(|e| format!("getting messages: {:?}", e))
+    })?;
 
     if messages.is_empty() {
         return telegram
@@ -54,26 +56,14 @@ async fn leaderboards<'a>(
             .map_err(|e| format!("sending no messages exist message: {}", e));
     }
 
-    let (total_msgs, since): (isize, isize) = conn
-        .query_row(
+    let (total_msgs, since): (isize, isize) = task::block_in_place(|| {
+        conn.query_row(
             include_sql!("getmessagesdata.sql"),
             params![chatid],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .map_err(|e| format!("getting message data: {:?}", e))?;
-
-    let edits = conn
-        .prepare_cached(include_sql!("geteditpercentage.sql"))
-        .unwrap()
-        .query_map(params![chatid], |row| {
-            let user_id = row.get(0)?;
-            let edit_percentage = row.get(1)?;
-            let total_edits = row.get(2)?;
-            Ok((user_id, edit_percentage, total_edits))
-        })
-        .unwrap()
-        .collect::<Result<Vec<(isize, f64, isize)>, rusqlite::Error>>()
-        .map_err(|e| format!("getting edit percentage: {:?}", e))?;
+        .map_err(|e| format!("getting message data: {:?}", e))
+    })?;
 
     let since = chrono::Local.timestamp(since as i64, 0);
     let mut redis = context.redis_pool.get().await;
@@ -107,6 +97,20 @@ async fn leaderboards<'a>(
     reply += "\n";
 
     // Edits
+    let edits = task::block_in_place(move || {
+        conn.prepare_cached(include_sql!("geteditpercentage.sql"))
+            .unwrap()
+            .query_map(params![chatid], |row| {
+                let user_id = row.get(0)?;
+                let edit_percentage = row.get(1)?;
+                let total_edits = row.get(2)?;
+                Ok((user_id, edit_percentage, total_edits))
+            })
+            .unwrap()
+            .collect::<Result<Vec<(isize, f64, isize)>, rusqlite::Error>>()
+            .map_err(|e| format!("getting edit percentage: {:?}", e))
+    })?;
+
     let mut edits = edits.into_iter();
     if let Some((user, percentage, count)) = edits.next() {
         let appendage = format!(
@@ -158,8 +162,8 @@ pub async fn stickerlog<'a>(
 
         let conn = context.db_pool.get().await;
         //Build caption message
-        let res = conn
-            .query_row(
+        let res = task::block_in_place(|| {
+            conn.query_row(
                 include_sql!("getstickerstats.sql"),
                 params![msg.chat.id as isize, from_time.timestamp() as isize],
                 |row| {
@@ -168,7 +172,8 @@ pub async fn stickerlog<'a>(
                     Ok((total_stickers, packs))
                 },
             )
-            .map_err(|e| format!("getting sticker stats: {:?}", e))?;
+            .map_err(|e| format!("getting sticker stats: {:?}", e))
+        })?;
 
         //For some reason type inferrance breaks when trying to assign these directly
         let (total_stickers, packs): (isize, isize) = res;
@@ -207,16 +212,17 @@ pub async fn stickerlog<'a>(
         );
 
         //Image rendering data
-        let logs = conn
-            .prepare_cached(include_sql!("getstickercounts.sql"))
-            .unwrap()
-            .query_map(
-                params![msg.chat.id as isize, from_time.timestamp() as isize],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap()
-            .collect::<Result<Vec<(String, i32)>, rusqlite::Error>>()
-            .map_err(|e| format!("getting sticker counts: {:?}", e))?;
+        let logs = task::block_in_place(|| {
+            conn.prepare_cached(include_sql!("getstickercounts.sql"))
+                .unwrap()
+                .query_map(
+                    params![msg.chat.id as isize, from_time.timestamp() as isize],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap()
+                .collect::<Result<Vec<(String, i32)>, rusqlite::Error>>()
+                .map_err(|e| format!("getting sticker counts: {:?}", e))
+        })?;
 
         let (file_ids, usages): (Vec<String>, Vec<i32>) = logs.into_iter().unzip();
         //Get sticker images
@@ -233,8 +239,9 @@ pub async fn stickerlog<'a>(
     };
 
     //Actual image rendering
-    let mut rendered_image = Vec::new();
-    {
+    let rendered_image: Result<Vec<u8>, String> = task::block_in_place(|| {
+        let mut rendered_image = Vec::new();
+
         //Fun constants to play with
         let height = 1200;
         let padding = 50.0; //padding between bars
@@ -333,9 +340,11 @@ pub async fn stickerlog<'a>(
         }
 
         surface.write_to_png(&mut rendered_image).unwrap();
-    }
+        Ok(rendered_image)
+    });
+
     telegram
-        .send_png_lossless(msg.chat.id, rendered_image, Some(caption), true)
+        .send_png_lossless(msg.chat.id, rendered_image?, Some(caption), true)
         .await
         .map(|_| ())
         .map_err(|e| format!("sending image: {}", e))
@@ -384,22 +393,21 @@ async fn simulate_chat(
         Ok(None) => {
             //Create a new chain
             let mut chain = Chain::of_order(order);
-            let messages = context
-                .db_pool
-                .get()
-                .await
-                .prepare_cached(include_sql!("getmessagetext.sql"))
-                .unwrap()
-                .query_map(params![chat.id], |row| {
-                    Ok(MessageData {
-                        message: row.get(0)?,
-                        userid: row.get(1)?,
-                        instant: row.get(2)?,
+            let conn = context.db_pool.get().await;
+            let messages = task::block_in_place(|| {
+                conn.prepare_cached(include_sql!("getmessagetext.sql"))
+                    .unwrap()
+                    .query_map(params![chat.id], |row| {
+                        Ok(MessageData {
+                            message: row.get(0)?,
+                            userid: row.get(1)?,
+                            instant: row.get(2)?,
+                        })
                     })
-                })
-                .unwrap()
-                .collect::<Result<Vec<MessageData>, rusqlite::Error>>()
-                .map_err(|e| format!("getting user message text: {:?}", e))?;
+                    .unwrap()
+                    .collect::<Result<Vec<MessageData>, rusqlite::Error>>()
+                    .map_err(|e| format!("getting user message text: {:?}", e))
+            })?;
 
             if messages.is_empty() {
                 return telegram
@@ -458,22 +466,22 @@ pub async fn simulate(
         Ok(None) => {
             //Create a new chain
             let mut chain = Chain::of_order(order);
-            let messages = context
-                .db_pool
-                .get()
-                .await
-                .prepare_cached(include_sql!("getmessagetext.sql"))
-                .unwrap()
-                .query_map(params![chatid], |row| {
-                    Ok(MessageData {
-                        message: row.get(0)?,
-                        userid: row.get(1)?,
-                        instant: row.get(2)?,
+            let conn = context.db_pool.get().await;
+
+            let messages = task::block_in_place(|| {
+                conn.prepare_cached(include_sql!("getmessagetext.sql"))
+                    .unwrap()
+                    .query_map(params![chatid], |row| {
+                        Ok(MessageData {
+                            message: row.get(0)?,
+                            userid: row.get(1)?,
+                            instant: row.get(2)?,
+                        })
                     })
-                })
-                .unwrap()
-                .collect::<Result<Vec<MessageData>, rusqlite::Error>>()
-                .map_err(|e| format!("getting user message text: {:?}", e))?;
+                    .unwrap()
+                    .collect::<Result<Vec<MessageData>, rusqlite::Error>>()
+                    .map_err(|e| format!("getting user message text: {:?}", e))
+            })?;
 
             if messages.is_empty() {
                 return telegram
@@ -531,16 +539,15 @@ pub async fn quote(
     telegram: &Telegram,
     context: &Context,
 ) -> Result<(), String> {
-    let (message, timestamp): (String, isize) = context
-        .db_pool
-        .get()
-        .await
-        .query_row(
+    let conn = context.db_pool.get().await;
+    let (message, timestamp): (String, isize) = task::block_in_place(|| {
+        conn.query_row(
             include_sql!("getrandomusermessage.sql"),
             params![chatid, userid],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .map_err(|e| format!("getting random quote: {:?}", e))?;
+        .map_err(|e| format!("getting random quote: {:?}", e))
+    })?;
 
     let date: DateTime<Local> = Utc.timestamp(timestamp as i64, 0).with_timezone(&Local);
 
@@ -568,15 +575,16 @@ async fn wordcount_graph(
     context: &Context,
 ) -> Result<(), String> {
     let conn = context.db_pool.get().await;
-    let results = conn
-        .prepare_cached(include_sql!("getwordcounts.sql"))
-        .unwrap()
-        .query_map(params![command_message.chat.id, 60], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
-        .unwrap()
-        .collect::<Result<Vec<(String, u32)>, rusqlite::Error>>()
-        .map_err(|e| format!("getting word counts: {:?}", e))?;
+    let results = task::block_in_place(move || {
+        conn.prepare_cached(include_sql!("getwordcounts.sql"))
+            .unwrap()
+            .query_map(params![command_message.chat.id, 60], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<(String, u32)>, rusqlite::Error>>()
+            .map_err(|e| format!("getting word counts: {:?}", e))
+    })?;
 
     if results.is_empty() {
         telegram
@@ -600,8 +608,7 @@ async fn wordcount_graph(
 
         //Perform this in a block such that the cairo context gets dropped before anything else.
         //Without this, this future won't be Sync.
-        let mut rendered_image = Vec::new();
-        {
+        let rendered_image = task::block_in_place(|| {
             let surface =
                 cairo::ImageSurface::create(Format::ARgb32, width as i32, height as i32).unwrap();
             let cairo = cairo::Context::new(&surface);
@@ -647,8 +654,10 @@ async fn wordcount_graph(
                 cairo.show_text(&word);
             }
 
+            let mut rendered_image = Vec::new();
             surface.write_to_png(&mut rendered_image).unwrap();
-        }
+            rendered_image
+        });
         telegram
             .send_png_lossless(command_message.chat.id, rendered_image, None, true)
             .await
@@ -664,13 +673,14 @@ async fn wordcount(
     context: &Context,
 ) -> Result<(), String> {
     let conn = context.db_pool.get().await;
-    let usages: isize = conn
-        .query_row(
+    let usages: isize = task::block_in_place(move || {
+        conn.query_row(
             include_sql!("getwordusage.sql"),
             params![word, chat.id],
             |row| row.get(1),
         )
-        .unwrap_or(0);
+        .unwrap_or(0)
+    });
 
     telegram
         .send_message_silent(
@@ -684,13 +694,14 @@ async fn wordcount(
 
 async fn charcount(chatid: i64, telegram: &Telegram, context: &Context) -> Result<(), String> {
     let conn = context.db_pool.get().await;
-    let messages: Vec<(i64, String)> = conn
-        .prepare_cached(include_sql!("getmessagebyuser.sql"))
-        .unwrap()
-        .query_map(params![chatid], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .collect::<Result<Vec<(i64, String)>, rusqlite::Error>>()
-        .map_err(|e| format!("getting messages and userid: {:?}", e))?;
+    let messages: Vec<(i64, String)> = task::block_in_place(|| {
+        conn.prepare_cached(include_sql!("getmessagebyuser.sql"))
+            .unwrap()
+            .query_map(params![chatid], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<(i64, String)>, rusqlite::Error>>()
+            .map_err(|e| format!("getting messages and userid: {:?}", e))
+    })?;
 
     if messages.is_empty() {
         return telegram
@@ -724,12 +735,14 @@ async fn charcount(chatid: i64, telegram: &Telegram, context: &Context) -> Resul
 
     macro_rules! get_user_msgcount {
         ($userid:expr) => {
-            conn.query_row(
-                include_sql!("getusermessagecount.sql"),
-                params![chatid, $userid],
-                |row| Ok(row.get(0)?),
-            )
-            .unwrap()
+            task::block_in_place(|| {
+                conn.query_row(
+                    include_sql!("getusermessagecount.sql"),
+                    params![chatid, $userid],
+                    |row| Ok(row.get(0)?),
+                )
+                .unwrap()
+            })
         };
     }
 
@@ -854,13 +867,16 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                 }
             } else {
                 //Build keyboard
-                let users = context.db_pool.get().await
-                    .prepare_cached(include_sql!("getchatusers.sql"))
-                    .unwrap()
-                    .query_map(params![msg.chat.id], |row| Ok(row.get(0)?))
-                    .unwrap()
-                    .collect::<Result<Vec<String>, rusqlite::Error>>()
-                    .map_err(|e| error!("Couldn't get users: {:?}", e));
+                let conn = context.db_pool.get().await;
+                let users = task::block_in_place(move || {
+                    conn
+                        .prepare_cached(include_sql!("getchatusers.sql"))
+                        .unwrap()
+                        .query_map(params![msg.chat.id], |row| Ok(row.get(0)?))
+                        .unwrap()
+                        .collect::<Result<Vec<String>, rusqlite::Error>>()
+                        .map_err(|e| error!("Couldn't get users: {:?}", e))
+                });
 
                 if users.is_err() {
                     return;

@@ -30,6 +30,6 @@ version = "0.20.0"
 features = ["bundled"]
 
 [dependencies.darkredis]
-version = "0.5.0"
+version = "0.5.2"
 default-features = false
-features = ["runtime_agnostic"]
+features = ["runtime_tokio"]

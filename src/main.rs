@@ -67,8 +67,14 @@ pub struct Context {
     db_pool: SqlPool,
 }
 
+//HACK: spawn real_main() in a task so that tokio::task::block_in_place works.
+//Should be fixed in a later version of tokio but do this for now
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    tokio::spawn(real_main()).await.unwrap()
+}
+
+async fn real_main() -> std::io::Result<()> {
     env_logger::init();
 
     let config_path = Path::new("tg.toml");

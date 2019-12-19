@@ -10,6 +10,7 @@ use crate::{
     util::{calculate_sticker_hash, get_user_id},
     Context,
 };
+use tokio::task;
 
 pub async fn handle_update(update: Update, telegram: &Telegram, context: &Context) {
     use Update::*;
@@ -19,11 +20,13 @@ pub async fn handle_update(update: Update, telegram: &Telegram, context: &Contex
         }
         MessageEdited(msg) => {
             let lock = context.db_pool.get().await;
-            lock.execute(
-                include_sql!("logedit.sql"),
-                params![msg.chat.id as isize, msg.from.id as isize, msg.id as isize],
-            )
-            .unwrap();
+            task::block_in_place(|| {
+                lock.execute(
+                    include_sql!("logedit.sql"),
+                    params![msg.chat.id as isize, msg.from.id as isize, msg.id as isize],
+                )
+                .unwrap();
+            });
             info!("[{}] user {} edited message {}", msg.chat, msg.from, msg.id,)
         }
         _ => warn!("Update event {:?} not handled!", update),
@@ -34,17 +37,19 @@ async fn log_message(telegram: &Telegram, msg: &Message, context: &Context) {
     match msg.data {
         MessageData::Text(ref text) => {
             let lock = context.db_pool.get().await;
-            lock.execute(
-                include_sql!("logmessage.sql"),
-                params![
-                    msg.id as isize,
-                    msg.chat.id as isize,
-                    msg.from.id as isize,
-                    text,
-                    msg.date as isize
-                ],
-            )
-            .unwrap();
+            task::block_in_place(|| {
+                lock.execute(
+                    include_sql!("logmessage.sql"),
+                    params![
+                        msg.id as isize,
+                        msg.chat.id as isize,
+                        msg.from.id as isize,
+                        text,
+                        msg.date as isize
+                    ],
+                )
+                .unwrap()
+            });
         }
         MessageData::Sticker(ref sticker) => {
             let mut redis = context.redis_pool.get().await;
@@ -57,20 +62,22 @@ async fn log_message(telegram: &Telegram, msg: &Message, context: &Context) {
                 return;
             } //this error gets logged elsewhere anyway
             let lock = context.db_pool.get().await;
-            lock.execute(
-                include_sql!("logsticker.sql"),
-                params![
-                    msg.from.id as isize,
-                    msg.chat.id as isize,
-                    msg.id as isize,
-                    sticker.file_id,
-                    sticker.emoji,
-                    sticker.set_name,
-                    msg.date as isize,
-                    hash.unwrap()
-                ],
-            )
-            .unwrap();
+            task::block_in_place(|| {
+                lock.execute(
+                    include_sql!("logsticker.sql"),
+                    params![
+                        msg.from.id as isize,
+                        msg.chat.id as isize,
+                        msg.id as isize,
+                        sticker.file_id,
+                        sticker.emoji,
+                        sticker.set_name,
+                        msg.date as isize,
+                        hash.unwrap()
+                    ],
+                )
+                .unwrap();
+            })
         }
         _ => (), //other message types are not logged yet
     }
@@ -184,17 +191,19 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
 
     //Take a snapshot of the user's data
     let conn = context.db_pool.get().await;
-    conn.execute(
-        include_sql!("updateuserdata.sql"),
-        params![
-            msg.from.id as isize,
-            msg.chat.id,
-            msg.from.first_name,
-            msg.from.last_name,
-            msg.from.username
-        ],
-    )
-    .unwrap();
+    task::block_in_place(|| {
+        conn.execute(
+            include_sql!("updateuserdata.sql"),
+            params![
+                msg.from.id as isize,
+                msg.chat.id,
+                msg.from.first_name,
+                msg.from.last_name,
+                msg.from.username
+            ],
+        )
+        .unwrap()
+    });
 
     info!("[{}] <{}>: {}", msg.chat, msg.from, msg.data);
 }

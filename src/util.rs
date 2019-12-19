@@ -17,7 +17,7 @@ pub async fn get_user(
     match redis.get(&user_path).await.unwrap() {
         Some(u) => rmp_serde::from_slice(&u).unwrap(),
         None => {
-            debug!("Getting user from tg");
+            debug!("Getting user from telegram");
             let user = telegram.get_chat_member(chat_id, user_id).await.unwrap();
             let serialized = rmp_serde::to_vec(&user).unwrap();
             redis
@@ -61,13 +61,15 @@ pub fn parse_time(input: &[String]) -> Option<Duration> {
 //If multiple users match, it will pick one at complete random due to how SQLite works
 pub async fn get_user_id(chat_id: i64, name: &str, pool: &SqlPool) -> Option<i64> {
     let conn = pool.get().await;
-    conn.query_row(
-        include_sql!("getuseridfromname.sql"),
-        params![chat_id as isize, name],
-        |row| Ok(row.get(0)?),
-    )
-    .optional()
-    .unwrap()
+    tokio::task::block_in_place(|| {
+        conn.query_row(
+            include_sql!("getuseridfromname.sql"),
+            params![chat_id as isize, name],
+            |row| Ok(row.get(0)?),
+        )
+        .optional()
+        .unwrap()
+    })
 }
 
 pub fn seconds_to_hours(seconds: i32) -> f64 {
