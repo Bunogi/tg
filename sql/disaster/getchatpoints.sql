@@ -1,5 +1,5 @@
-SELECT points, IFNULL(userid, 0)
+SELECT points, coalesce(userid, 0)
   FROM DisasterStatus
- WHERE chatid = ?
- GROUP BY userid
+ WHERE chatid = $1
+ GROUP BY userid, points
  ORDER BY points DESC

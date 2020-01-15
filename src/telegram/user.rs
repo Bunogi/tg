@@ -3,7 +3,7 @@ use std::fmt;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct User {
-    pub id: u64,
+    pub id: i64,
     pub first_name: String,
     pub is_bot: bool,
     pub last_name: Option<String>,

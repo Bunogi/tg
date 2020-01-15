@@ -4,9 +4,9 @@ use std::fmt;
 
 #[derive(Clone, Debug)]
 pub struct Message {
-    pub id: u64,
+    pub id: i64,
     pub from: User,
-    pub date: u64,
+    pub date: i64,
     pub data: MessageData,
     pub chat: Chat,
 }

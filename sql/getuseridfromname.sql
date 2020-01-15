@@ -1,8 +1,6 @@
 SELECT id FROM LastUserData
- WHERE chatid = ?
-   AND (firstname   LIKE "%" || ?2 || "%"
-        OR lastname LIKE "%" || ?2 || "%"
-        OR username LIKE "%" || ?2 || "%"
-        OR firstname || " " || lastname
-            LIKE "%" || ?2  || "%")
+ WHERE chatid = $1
+   AND (username ILIKE '%' || $2 || '%'
+        OR firstname || ' ' || lastname
+            ILIKE '%' || $2  || '%')
  LIMIT 1

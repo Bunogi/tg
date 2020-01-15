@@ -1,19 +1,13 @@
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate rusqlite;
 
 use crate::telegram::Telegram;
-use db::SqlPool;
+use deadpool_postgres::{Manager, Pool};
 use futures::stream::StreamExt;
 use serde::Deserialize;
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
-use std::process::exit;
+use std::{fs::File, io::Read, path::Path, process::exit};
 
 mod commands;
-mod db;
 mod handlers;
 mod telegram;
 mod util;
@@ -26,6 +20,7 @@ pub struct Config {
     cache: CacheConfig,
     disaster: DisasterConfig,
     general: GeneralConfig,
+    postgres: PostgresConfig,
 }
 
 #[derive(Default, Deserialize)]
@@ -61,10 +56,18 @@ struct RedisConfig {
     password: Option<String>,
 }
 
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PostgresConfig {
+    user: String,
+    host: String,
+    password: Option<String>,
+}
+
 pub struct Context {
     config: Config,
     redis_pool: darkredis::ConnectionPool,
-    db_pool: SqlPool,
+    db_pool: Pool,
 }
 
 //HACK: spawn real_main() in a task so that tokio::task::block_in_place works.
@@ -114,34 +117,45 @@ async fn real_main() -> std::io::Result<()> {
         }
     };
     info!("Opening database connections...");
-    let db_pool = SqlPool::new(max_connections, "logs.db").unwrap();
+    let mut postgres_config = tokio_postgres::Config::new();
+    postgres_config.host(&config.postgres.host);
+    postgres_config.user(&config.postgres.user);
+    if let Some(ref p) = &config.postgres.password {
+        postgres_config.password(p);
+    }
+    let db_pool = Pool::new(
+        Manager::new(postgres_config, tokio_postgres::NoTls),
+        max_connections,
+    );
 
     {
         info!("Creating tables if necesarry...");
-        let db = db_pool.get().await;
-        db.execute_batch(include_sql!("create.sql")).unwrap();
+        let db = db_pool.get().await.unwrap();
+        db.batch_execute(include_sql!("create.sql")).await.unwrap();
         info!("Tables created!");
     }
 
     info!("Connecting to Telegram...");
     let telegram = Telegram::connect(std::env::var("TELEGRAM_BOT_TOKEN").unwrap()).await;
-    if telegram.is_err() {
-        error!("Failed to connect to telegram: {}", telegram.unwrap_err());
-        exit(2);
-    } else {
-        let context = Context {
-            config,
-            redis_pool,
-            db_pool,
-        };
-        let telegram = telegram.unwrap();
+    match telegram {
+        Ok(telegram) => {
+            let context = Context {
+                config,
+                redis_pool,
+                db_pool,
+            };
 
-        loop {
-            info!("Listening to updates...");
-            telegram
-                .updates()
-                .for_each_concurrent(None, |f| handlers::handle_update(f, &telegram, &context))
-                .await;
+            loop {
+                info!("Listening to updates...");
+                telegram
+                    .updates()
+                    .for_each_concurrent(None, |f| handlers::handle_update(f, &telegram, &context))
+                    .await;
+            }
+        }
+        Err(e) => {
+            error!("Failed to connect to telegram: {}", e);
+            exit(2);
         }
     }
 }

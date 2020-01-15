@@ -1,3 +1,3 @@
-SELECT IFNULL(points, 0)
+SELECT coalesce(points, 0)
   FROM DisasterStatus
- WHERE chatid = ? AND userid = ?
+ WHERE chatid = $1 AND userid = $2

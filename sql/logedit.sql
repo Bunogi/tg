@@ -1,2 +1,2 @@
 INSERT INTO EditLogs (chatid, userid, msgid)
-VALUES (?,?,?)
+VALUES ($1,$2,$3)

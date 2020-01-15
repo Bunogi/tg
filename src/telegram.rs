@@ -61,9 +61,9 @@ impl fmt::Display for Sticker {
 #[derive(Debug, Deserialize)]
 struct ApiMessage {
     #[serde(rename = "message_id")]
-    id: u64,
+    id: i64,
     from: Option<User>,
-    date: u64,
+    date: i64,
     text: Option<String>,
     forward_from: Option<User>,
     reply_to_message: Option<Box<ApiMessage>>,
@@ -163,7 +163,7 @@ impl Telegram {
 
     pub async fn reply_to(
         &self,
-        msg_id: u64,
+        msg_id: i64,
         chat_id: i64,
         text: String,
     ) -> Result<Message, String> {
@@ -177,7 +177,7 @@ impl Telegram {
 
     pub async fn reply_with_markup(
         &self,
-        msg_id: u64,
+        msg_id: i64,
         chat_id: i64,
         text: String,
         markup: serde_json::Value,
@@ -208,7 +208,7 @@ impl Telegram {
 
     pub async fn reply_and_close_keyboard(
         &self,
-        msg_id: u64,
+        msg_id: i64,
         chat_id: i64,
         text: String,
     ) -> Result<Message, String> {
@@ -422,7 +422,7 @@ impl Telegram {
             .map_err(|_| ())
     }
 
-    pub async fn delete_message(&self, chat_id: i64, message_id: u64) {
+    pub async fn delete_message(&self, chat_id: i64, message_id: i64) {
         let url = self.get_url("deleteMessage");
         let json = serde_json::json!({
             "chat_id": chat_id,

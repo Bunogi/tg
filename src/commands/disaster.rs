@@ -1,8 +1,8 @@
-use crate::{include_sql, telegram::Telegram, Context};
+use crate::{include_sql, params, telegram::Telegram, Context};
 use chrono::prelude::*;
 use darkredis::{Command, CommandList, Value};
 use serde::{Deserialize, Serialize};
-use tokio::task;
+use tokio_postgres::types::Type;
 
 #[derive(Serialize, Deserialize)]
 struct LastDisaster {
@@ -13,10 +13,10 @@ struct LastDisaster {
 
 pub async fn add_point(
     receiverid: i64,
-    giverid: u64,
+    giverid: i64,
     chatid: i64,
-    messageid: u64,
-    timestamp: u64,
+    messageid: i64,
+    timestamp: i64,
     telegram: &Telegram,
     context: &Context,
 ) -> Result<(), String> {
@@ -59,21 +59,20 @@ pub async fn add_point(
             .map_err(|e| format!("sending error message: {}", e));
     }
 
-    let conn = context.db_pool.get().await;
-    task::block_in_place(|| {
-        conn.execute(
-            include_sql!("disaster/addpoint.sql"),
-            params![chatid, receiverid],
-        )
-        .map_err(|e| format!("adding a disaster point: {:?}", e))
-    })?;
+    let conn = context.db_pool.get().await.unwrap();
+    conn.execute(
+        include_sql!("disaster/addpoint.sql"),
+        params![chatid, receiverid],
+    )
+    .await
+    .map_err(|e| format!("adding a disaster point: {:?}", e))?;
 
     //Update last disaster points given list in redis and set cooldown using a pipeline
     let last_disaster_key = format!("tg.lastdisasterpoints.{}", chatid).into_bytes();
     let last_disaster = rmp_serde::to_vec(&LastDisaster {
-        from: giverid as i64,
+        from: giverid,
         to: receiverid,
-        utc: timestamp as i64,
+        utc: timestamp,
     })
     .unwrap();
     let timeout = (context.config.disaster.cooldown * 3600).to_string();
@@ -97,14 +96,14 @@ pub async fn add_point(
         .map_err(|e| format!("adding redis disaster data: {:?}", e))?;
 
     //Send the update status message
-    let points: isize = task::block_in_place(|| {
-        conn.query_row(
+    let points: i64 = conn
+        .query_one(
             include_sql!("disaster/getuserpoints.sql"),
             params![chatid, receiverid],
-            |row| Ok(row.get(0)?),
         )
-        .map_err(|e| format!("getting user points: {:?}", e))
-    })?;
+        .await
+        .map(|r| r.get(0))
+        .map_err(|e| format!("getting user points: {:?}", e))?;
 
     telegram
         .reply_and_close_keyboard(
@@ -128,15 +127,19 @@ pub async fn show_points(
     telegram: &Telegram,
     context: &Context,
 ) -> Result<(), String> {
-    let conn = context.db_pool.get().await;
-    let points = task::block_in_place(|| {
-        conn.prepare_cached(include_sql!("disaster/getchatpoints.sql"))
-            .unwrap()
-            .query_map(params![chatid], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .collect::<Result<Vec<(i32, i64)>, rusqlite::Error>>()
-            .map_err(|e| format!("getting chat points: {:?}", e))
-    })?;
+    let conn = context.db_pool.get().await.unwrap();
+    let stmt = conn
+        .prepare_typed(include_sql!("disaster/getchatpoints.sql"), &[Type::INT8])
+        .await
+        .unwrap();
+
+    let points = conn
+        .query(&stmt, params![chatid])
+        .await
+        .map_err(|e| format!("getting chat points: {:?}", e))?
+        .into_iter()
+        .map(|row| (row.get(0), row.get(1)))
+        .collect::<Vec<(i64, i64)>>();
 
     if points.is_empty() {
         return telegram

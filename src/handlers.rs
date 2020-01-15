@@ -1,6 +1,6 @@
 use crate::{
     commands::{self, handle_command},
-    include_sql,
+    include_sql, params,
     telegram::{
         chat::ChatType,
         message::{Message, MessageData},
@@ -10,7 +10,7 @@ use crate::{
     util::{calculate_sticker_hash, get_user_id},
     Context,
 };
-use tokio::task;
+use tokio_postgres::types::Type;
 
 pub async fn handle_update(update: Update, telegram: &Telegram, context: &Context) {
     use Update::*;
@@ -19,14 +19,14 @@ pub async fn handle_update(update: Update, telegram: &Telegram, context: &Contex
             handle_message(msg, &telegram, context).await;
         }
         MessageEdited(msg) => {
-            let lock = context.db_pool.get().await;
-            task::block_in_place(|| {
-                lock.execute(
-                    include_sql!("logedit.sql"),
-                    params![msg.chat.id as isize, msg.from.id as isize, msg.id as isize],
-                )
-                .unwrap();
-            });
+            let conn = context.db_pool.get().await.unwrap();
+            conn.execute(
+                include_sql!("logedit.sql"),
+                params![msg.chat.id, msg.from.id, msg.id],
+            )
+            .await
+            .unwrap();
+
             info!("[{}] user {} edited message {}", msg.chat, msg.from, msg.id,)
         }
         _ => warn!("Update event {:?} not handled!", update),
@@ -36,20 +36,20 @@ pub async fn handle_update(update: Update, telegram: &Telegram, context: &Contex
 async fn log_message(telegram: &Telegram, msg: &Message, context: &Context) {
     match msg.data {
         MessageData::Text(ref text) => {
-            let lock = context.db_pool.get().await;
-            task::block_in_place(|| {
-                lock.execute(
+            let conn = context.db_pool.get().await.unwrap();
+            let stmt = conn
+                .prepare_typed(
                     include_sql!("logmessage.sql"),
-                    params![
-                        msg.id as isize,
-                        msg.chat.id as isize,
-                        msg.from.id as isize,
-                        text,
-                        msg.date as isize
-                    ],
+                    &[Type::INT8, Type::INT8, Type::INT8, Type::TEXT, Type::INT8],
                 )
-                .unwrap()
-            });
+                .await
+                .unwrap();
+            conn.execute(
+                &stmt,
+                params![msg.id, msg.chat.id, msg.from.id, text, msg.date],
+            )
+            .await
+            .unwrap();
         }
         MessageData::Sticker(ref sticker) => {
             let mut redis = context.redis_pool.get().await;
@@ -61,23 +61,39 @@ async fn log_message(telegram: &Telegram, msg: &Message, context: &Context) {
             if hash.is_err() {
                 return;
             } //this error gets logged elsewhere anyway
-            let lock = context.db_pool.get().await;
-            task::block_in_place(|| {
-                lock.execute(
+
+            let conn = context.db_pool.get().await.unwrap();
+            let stmt = conn
+                .prepare_typed(
                     include_sql!("logsticker.sql"),
-                    params![
-                        msg.from.id as isize,
-                        msg.chat.id as isize,
-                        msg.id as isize,
-                        sticker.file_id,
-                        sticker.emoji,
-                        sticker.set_name,
-                        msg.date as isize,
-                        hash.unwrap()
+                    &[
+                        Type::INT8,
+                        Type::INT8,
+                        Type::INT8,
+                        Type::TEXT,
+                        Type::TEXT,
+                        Type::TEXT,
+                        Type::INT8,
+                        Type::BYTEA,
                     ],
                 )
+                .await
                 .unwrap();
-            })
+            conn.execute(
+                &stmt,
+                params![
+                    msg.from.id,
+                    msg.chat.id,
+                    msg.id,
+                    sticker.file_id,
+                    sticker.emoji,
+                    sticker.set_name,
+                    msg.date,
+                    hash.unwrap(),
+                ],
+            )
+            .await
+            .unwrap();
         }
         _ => (), //other message types are not logged yet
     }
@@ -190,20 +206,19 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
     }
 
     //Take a snapshot of the user's data
-    let conn = context.db_pool.get().await;
-    task::block_in_place(|| {
-        conn.execute(
-            include_sql!("updateuserdata.sql"),
-            params![
-                msg.from.id as isize,
-                msg.chat.id,
-                msg.from.first_name,
-                msg.from.last_name,
-                msg.from.username
-            ],
-        )
-        .unwrap()
-    });
+    let conn = context.db_pool.get().await.unwrap();
+    conn.execute(
+        include_sql!("updateuserdata.sql"),
+        params![
+            msg.from.id,
+            msg.chat.id,
+            msg.from.first_name,
+            msg.from.last_name,
+            msg.from.username
+        ],
+    )
+    .await
+    .unwrap();
 
     info!("[{}] <{}>: {}", msg.chat, msg.from, msg.data);
 }

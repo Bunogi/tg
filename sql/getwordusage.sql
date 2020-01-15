@@ -10,5 +10,5 @@ WITH RECURSIVE split(lword, rest, chatid) AS (
 
 SELECT LOWER(lword) as word, COUNT(*) AS uses
   FROM split
- WHERE word = LOWER(?) AND chatid = ?
+ WHERE word = LOWER($1) AND chatid = $2
  GROUP BY word

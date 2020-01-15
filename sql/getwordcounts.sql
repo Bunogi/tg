@@ -8,10 +8,9 @@ WITH RECURSIVE split(lword, rest, chatid) AS (
     FROM split
    WHERE rest <> '')
 
-
 SELECT LOWER(lword) as word, COUNT(*) AS uses
   FROM split
- WHERE word <> '' AND chatid = ?
+ WHERE word <> '' AND chatid = $1
  GROUP BY word
  ORDER BY uses DESC
- LIMIT ?
+ LIMIT $2

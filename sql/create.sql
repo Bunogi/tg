@@ -1,31 +1,33 @@
+BEGIN TRANSACTION;
+
 CREATE TABLE IF NOT EXISTS MessageLogs (
-  chatid INTEGER NOT NULL,
-  userid INTEGER NOT NULL,
-  msgid INTEGER NOT NULL,
+  chatid BIGINT NOT NULL,
+  userid BIGINT NOT NULL,
+  msgid BIGINT NOT NULL,
   message TEXT NOT NULL,
-  instant INTEGER NOT NULL
+  instant BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS EditLogs (
-  chatid INTEGER NOT NULL,
-  userid INTEGER NOT NULL,
-  msgid INTEGER NOT NULL
+  chatid BIGINT NOT NULL,
+  userid BIGINT NOT NULL,
+  msgid BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS StickerLogs (
-  userid INTEGER NOT NULL,
-  chatid INTEGER NOT NULL,
-  msgid INTEGER NOT NULL,
+  userid BIGINT NOT NULL,
+  chatid BIGINT NOT NULL,
+  msgid BIGINT NOT NULL,
   fileid TEXT NOT NULL,
   packname TEXT,
   emoji TEXT,
-  instant INTEGER NOT NULL,
-  hash BLOB NOT NULL
+  instant BIGINT NOT NULL,
+  hash BYTEA NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS LastUserData (
-  id INTEGER,
-  chatid INTEGER,
+  id BIGINT,
+  chatid BIGINT,
   firstname TEXT NOT NULL,
   lastname TEXT,
   username TEXT,
@@ -33,8 +35,9 @@ CREATE TABLE IF NOT EXISTS LastUserData (
 );
 
 CREATE TABLE IF NOT EXISTS DisasterStatus (
-  userid INTEGER,
-  chatid INTEGER,
-  points INTEGER,
+  userid BIGINT,
+  chatid BIGINT,
+  points BIGINT,
   PRIMARY KEY(chatid, userid)
 );
+COMMIT;

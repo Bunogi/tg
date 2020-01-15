@@ -1,10 +1,22 @@
-use crate::db::SqlPool;
 use crate::include_sql;
 use crate::telegram::{user::User, Telegram};
 use chrono::Duration;
+use deadpool_postgres::Pool;
 use md5::{Digest, Md5};
-use rusqlite::OptionalExtension;
 
+#[macro_export]
+macro_rules! include_sql {
+    ($s:tt) => {
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/sql/", $s))
+    };
+}
+
+#[macro_export]
+macro_rules! params {
+    [$($x:expr),+ $(,)?] => {
+        &[$(&$x),+]
+    };
+}
 //Will get the user from cache if it is cached, otherwise request the data
 pub async fn get_user(
     chat_id: i64,
@@ -59,17 +71,15 @@ pub fn parse_time(input: &[String]) -> Option<Duration> {
 
 //Returns the last known user id matching name in chat_id
 //If multiple users match, it will pick one at complete random due to how SQLite works
-pub async fn get_user_id(chat_id: i64, name: &str, pool: &SqlPool) -> Option<i64> {
-    let conn = pool.get().await;
-    tokio::task::block_in_place(|| {
-        conn.query_row(
-            include_sql!("getuseridfromname.sql"),
-            params![chat_id as isize, name],
-            |row| Ok(row.get(0)?),
-        )
-        .optional()
-        .unwrap()
-    })
+pub async fn get_user_id(chat_id: i64, name: &str, pool: &Pool) -> Option<i64> {
+    let conn = pool.get().await.unwrap();
+    conn.query_opt(
+        include_sql!("getuseridfromname.sql"),
+        params![chat_id, name],
+    )
+    .await
+    .unwrap()
+    .map(|r| r.get(0))
 }
 
 pub fn seconds_to_hours(seconds: i32) -> f64 {

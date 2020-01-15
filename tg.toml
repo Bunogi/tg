@@ -2,6 +2,11 @@
 [general]
 time_format = "%A, %e %B %Y %H:%M:%S %Z"
 
+[postgres]
+host = "127.0.0.1"
+user = "tg"
+# password = "some-password"
+
 [markov]
 chain_order = 1 # Default order of chains if no order is specified
 max_order = 5 # Maximum order

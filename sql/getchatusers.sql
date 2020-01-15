@@ -1,4 +1,4 @@
-SELECT IFNULL(username, firstname || " " || IFNULL(lastName, "")) AS name
+SELECT COALESCE(username, firstname || ' ' || COALESCE(lastName, '')) AS name
   FROM LastUserData
- WHERE chatid = ?
+ WHERE chatid = $1
  ORDER BY name
