@@ -10,6 +10,8 @@ user = "tg"
 [markov]
 chain_order = 1 # Default order of chains if no order is specified
 max_order = 5 # Maximum order
+min_words = 4 # Minimum number of words to generate in simulations
+max_attempts = 100 # Maximum number of attempts to try to get at least min_words
 
 [redis]
 address = "127.0.0.1:6379"

@@ -217,7 +217,15 @@ async fn simulate_chat(
         Err(e) => Err(format!("redis failure getting markov chain data: {}", e)),
     }?;
 
-    let mut output = format!("Simulated {}: {}", chat, chain.generate_str());
+    let mut output = format!(
+        "Simulated {}: {}",
+        chat,
+        generate_string_with_minimum_words(
+            chain,
+            context.config.markov.min_words,
+            context.config.markov.max_attempts
+        )
+    );
 
     //Telegram limits message size
     output.truncate(4000);
@@ -227,6 +235,26 @@ async fn simulate_chat(
         .await
         .map(|_| ())
         .map_err(|e| format!("sending simulated string: {}", e))
+}
+
+fn generate_string_with_minimum_words(
+    chain: Chain<String>,
+    minimum: usize,
+    max_attempts: usize,
+) -> String {
+    for i in 0..max_attempts {
+        let out = chain.generate_str();
+        if out.chars().filter(|c| *c == ' ').count() > minimum - 1 {
+            info!(
+                "Used {}/{} attempts to generate simulation string",
+                i + 1,
+                max_attempts
+            );
+            return out;
+        }
+    }
+    info!("Used up all simulation attempts!");
+    chain.generate_str()
 }
 
 pub async fn simulate(
@@ -299,7 +327,11 @@ pub async fn simulate(
     let mut output = format!(
         "{}<s>: {}",
         get_user(chatid, userid, telegram, &context.config, &mut redis).await,
-        chain.generate_str()
+        generate_string_with_minimum_words(
+            chain,
+            context.config.markov.min_words,
+            context.config.markov.max_attempts
+        )
     );
 
     //Telegram limits message size

@@ -47,6 +47,8 @@ struct CacheConfig {
 struct Markov {
     chain_order: usize,
     max_order: usize,
+    min_words: usize,
+    max_attempts: usize,
 }
 
 #[derive(Default, Deserialize)]
