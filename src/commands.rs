@@ -103,7 +103,7 @@ async fn leaderboards<'a>(
         .map(|row| {
             (
                 row.get(0),
-                row.get::<usize, f32>(1),
+                row.get::<usize, f64>(1),
                 row.get::<usize, i64>(2),
             )
         });

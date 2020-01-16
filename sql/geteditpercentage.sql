@@ -1,5 +1,5 @@
 SELECT MessageLogs.userid,
-       edits.uniqueEdits * 1.0 / COUNT(*) * 100.0 AS percentage,
+       edits.uniqueEdits * CAST(1.0 AS DOUBLE PRECISION) / COUNT(*) * 100.0 AS percentage,
        edits.totalEdits AS totalEdits
   FROM MessageLogs
          JOIN (SELECT COUNT(DISTINCT EditLogs.msgid) AS uniqueEdits,
