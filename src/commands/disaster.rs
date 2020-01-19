@@ -1,6 +1,7 @@
 use crate::{include_sql, params, telegram::Telegram, Context};
 use chrono::prelude::*;
 use darkredis::{Command, CommandList, Value};
+use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use tokio_postgres::types::Type;
 
@@ -90,10 +91,14 @@ pub async fn add_point(
         .arg(b"EX")
         .arg(&timeout); // n hour cooldown
 
-    redis
+    let res: Result<Vec<darkredis::Value>, darkredis::Error> = redis
         .run_commands(command)
         .await
-        .map_err(|e| format!("adding redis disaster data: {:?}", e))?;
+        .map_err(|e| format!("communicating with redis: {:?}", e))?
+        .try_collect()
+        .await;
+
+    res.map_err(|e| format!("adding redis disaster data: {:?}", e))?;
 
     //Send the update status message
     let points: i64 = conn
