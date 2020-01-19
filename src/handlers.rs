@@ -99,6 +99,73 @@ async fn log_message(telegram: &Telegram, msg: &Message, context: &Context) {
     }
 }
 
+async fn handle_text_reply(
+    text: &str,
+    telegram: &Telegram,
+    context: &Context,
+    msg: &Message,
+    other_message: &Message,
+) {
+    let mut redis = context.redis_pool.get().await;
+    //Check if the message is a reply to a reply command
+    let key = format!("tg.replycommand.{}.{}", msg.chat.id, other_message.id);
+    match redis.get(&key).await {
+        Ok(Some(command)) => {
+            let command: commands::ReplyCommand = rmp_serde::from_slice(&command).unwrap();
+            let userid = get_user_id(msg.chat.id, &text, &context.db_pool).await;
+            if let Some(userid) = userid {
+                match command.action {
+                    commands::ReplyAction::Quote => {
+                        let _ = crate::commands::quote(
+                            userid,
+                            msg.chat.id,
+                            command.command_message_id,
+                            telegram,
+                            context,
+                        )
+                        .await
+                        .map_err(|e| error!("failed to quote from reply message: {}", e));
+                    }
+                    commands::ReplyAction::Simulate => {
+                        let _ = crate::commands::simulate(
+                            userid,
+                            msg.chat.id,
+                            context.config.markov.chain_order,
+                            command.command_message_id,
+                            telegram,
+                            context,
+                        )
+                        .await
+                        .map_err(|e| error!("failed to simulate from reply message: {}", e));
+                    }
+                    commands::ReplyAction::AddDisasterPoint => {
+                        let _ = crate::commands::disaster::add_point(
+                            userid,
+                            msg.from.id,
+                            msg.chat.id,
+                            command.command_message_id,
+                            msg.date,
+                            telegram,
+                            context,
+                        )
+                        .await
+                        .map_err(|e| {
+                            error!("failed to add a disaster point from reply message: {}", e)
+                        });
+                    }
+                }
+                futures::future::join(
+                    telegram.delete_message(msg.chat.id, msg.id),
+                    telegram.delete_message(msg.chat.id, other_message.id),
+                )
+                .await;
+            }
+        }
+        Ok(None) => (),
+        Err(e) => error!("redis error getting reply command: {:?}", e),
+    }
+}
+
 async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
     //Never log private chats
     let mut should_log = if let ChatType::Private = msg.chat.kind {
@@ -119,77 +186,11 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
             if other_message.from.id == telegram.bot_user().id {
                 should_log = false;
                 //Only support text-based reply commands for now
-                let text = if let MessageData::Text(ref text) = **data {
-                    text
+                if let MessageData::Text(ref text) = **data {
+                    handle_text_reply(text, &telegram, context, msg, other_message).await;
                 } else {
                     return;
                 };
-                let mut redis = context.redis_pool.get().await;
-                //Check if the message is a reply to a reply command
-                let key = format!("tg.replycommand.{}.{}", msg.chat.id, other_message.id);
-                match redis.get(&key).await {
-                    Ok(Some(command)) => {
-                        let command: commands::ReplyCommand =
-                            rmp_serde::from_slice(&command).unwrap();
-                        let userid = get_user_id(msg.chat.id, &text, &context.db_pool).await;
-                        if let Some(userid) = userid {
-                            match command.action {
-                                commands::ReplyAction::Quote => {
-                                    let _ = crate::commands::quote(
-                                        userid,
-                                        msg.chat.id,
-                                        command.command_message_id,
-                                        telegram,
-                                        context,
-                                    )
-                                    .await
-                                    .map_err(|e| {
-                                        error!("failed to quote from reply message: {}", e)
-                                    });
-                                }
-                                commands::ReplyAction::Simulate => {
-                                    let _ = crate::commands::simulate(
-                                        userid,
-                                        msg.chat.id,
-                                        context.config.markov.chain_order,
-                                        command.command_message_id,
-                                        telegram,
-                                        context,
-                                    )
-                                    .await
-                                    .map_err(|e| {
-                                        error!("failed to simulate from reply message: {}", e)
-                                    });
-                                }
-                                commands::ReplyAction::AddDisasterPoint => {
-                                    let _ = crate::commands::disaster::add_point(
-                                        userid,
-                                        msg.from.id,
-                                        msg.chat.id,
-                                        command.command_message_id,
-                                        msg.date,
-                                        telegram,
-                                        context,
-                                    )
-                                    .await
-                                    .map_err(|e| {
-                                        error!(
-                                            "failed to add a disaster point from reply message: {}",
-                                            e
-                                        )
-                                    });
-                                }
-                            }
-                            futures::future::join(
-                                telegram.delete_message(msg.chat.id, msg.id),
-                                telegram.delete_message(msg.chat.id, other_message.id),
-                            )
-                            .await;
-                        }
-                    }
-                    Ok(None) => (),
-                    Err(e) => error!("redis error getting reply command: {:?}", e),
-                }
             }
         }
         _ => (),
