@@ -22,6 +22,37 @@ mod stickerlog;
 
 pub use stickerlog::stickerlog;
 
+pub async fn log_command(command: &str, context: &Context, message: &Message) {
+    debug!("command is {}", command);
+    let time: DateTime<Local> = Utc.timestamp(message.date, 0).into();
+    let mut conn = context.db_pool.get().await.unwrap();
+    let tx = conn.transaction().await.unwrap();
+    //Register function
+    tx.execute(include_sql!("getcommandidfunction.sql"), &[])
+        .await
+        .unwrap();
+
+    let command_id: Result<i64, ()> = tx
+        .query_one(include_sql!("getcommandid.sql"), params![command])
+        .await
+        .map(|row| row.get(0))
+        .map_err(|e| error!("Couldn't get command id: {:?}", e));
+
+    if command_id.is_ok()
+        && tx
+            .execute(
+                include_sql!("logcommand.sql"),
+                params![message.from.id, message.chat.id, command_id.unwrap(), time],
+            )
+            .await
+            .map_err(|e| error!("Failed to log command: {:?}", e))
+            .is_ok()
+    {
+        tx.commit().await.unwrap();
+        debug!("Successfully logged /{}", command);
+    }
+}
+
 //Resolves commands written like /command@foobot which telegram does automatically. Cannot support '@' in command names.
 fn get_command<'a>(input: &'a str, botname: &str) -> Option<&'a str> {
     if let Some(at) = input.find('@') {
@@ -655,6 +686,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         command.unwrap()
     };
 
+    let mut should_log = true;
     //Macro for extracting user name and asking for a user using a keyboard if none is given
     macro_rules! with_user {
         ($action:expr, $fun:ident ( _, $( $arg:expr ),* ) ) => {
@@ -673,6 +705,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                         .map_err(|e| format!("sending invalid user message: {}", e)),
                 }
             } else {
+                should_log = false;
                 //Build keyboard
                 let conn = context.db_pool.get().await.unwrap();
                 let users =
@@ -777,6 +810,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         }
         "/disasterpoints" => disaster::show_points(msg.chat.id, telegram, context).await,
         _ => {
+            should_log = false;
             warn!("No command found for {}", root);
             if let ChatType::Private = msg.chat.kind {
                 //Only nag at the user for wrong command if in a private chat
@@ -792,6 +826,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
     };
 
     if let Err(e) = res {
+        should_log = false;
         error!("Command '{}' failed at '{}'", &root[1..], e);
         //If this causes an error something bad must have happened
         let _ = telegram
@@ -800,5 +835,10 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                 "Fatal error occurred in command, see bot log".into(),
             )
             .await;
+    }
+
+    // Log the usage of the command
+    if should_log {
+        log_command(&root[1..], context, msg).await;
     }
 }

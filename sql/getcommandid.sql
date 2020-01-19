@@ -1,0 +1,1 @@
+SELECT getCommandId($1)

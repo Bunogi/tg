@@ -116,7 +116,7 @@ async fn handle_text_reply(
             if let Some(userid) = userid {
                 match command.action {
                     commands::ReplyAction::Quote => {
-                        let _ = crate::commands::quote(
+                        let res = crate::commands::quote(
                             userid,
                             msg.chat.id,
                             command.command_message_id,
@@ -125,9 +125,13 @@ async fn handle_text_reply(
                         )
                         .await
                         .map_err(|e| error!("failed to quote from reply message: {}", e));
+
+                        if res.is_ok() {
+                            commands::log_command("quote", context, msg).await;
+                        }
                     }
                     commands::ReplyAction::Simulate => {
-                        let _ = crate::commands::simulate(
+                        let res = crate::commands::simulate(
                             userid,
                             msg.chat.id,
                             context.config.markov.chain_order,
@@ -137,9 +141,13 @@ async fn handle_text_reply(
                         )
                         .await
                         .map_err(|e| error!("failed to simulate from reply message: {}", e));
+
+                        if res.is_ok() {
+                            commands::log_command("simulate", context, msg).await;
+                        }
                     }
                     commands::ReplyAction::AddDisasterPoint => {
-                        let _ = crate::commands::disaster::add_point(
+                        let res = crate::commands::disaster::add_point(
                             userid,
                             msg.from.id,
                             msg.chat.id,
@@ -152,6 +160,10 @@ async fn handle_text_reply(
                         .map_err(|e| {
                             error!("failed to add a disaster point from reply message: {}", e)
                         });
+
+                        if res.is_ok() {
+                            commands::log_command("disaster", context, msg).await;
+                        }
                     }
                 }
                 futures::future::join(
