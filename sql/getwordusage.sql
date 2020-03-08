@@ -1,14 +1,11 @@
---Splits every message into words in messagelogs, carry chatid all the way
-WITH RECURSIVE split(lword, rest, chatid) AS (
-  SELECT '', message || ' ' , chatid FROM MessageLogs
-   UNION ALL
-  SELECT SUBSTR(rest, 0, INSTR(rest, ' ')),
-         SUBSTR(rest, INSTR(rest, ' ') + 1),
-         chatid
-    FROM split
-   WHERE rest <> '')
-
-SELECT LOWER(lword) as word, COUNT(*) AS uses
-  FROM split
- WHERE word = LOWER($1) AND chatid = $2
+WITH words AS (
+  SELECT regexp_split_to_table(message, E'\\s+') AS word
+    FROM MessageLogs
+   WHERE chatid = $2
+), lowerwords AS (
+  SELECT LOWER(word) AS word
+    FROM words
+) SELECT word, COUNT(*) AS uses
+  FROM lowerwords
+ WHERE word = LOWER($1)
  GROUP BY word

@@ -421,13 +421,13 @@ async fn wordcount_graph(
     let results = conn
         .query(
             include_sql!("getwordcounts.sql"),
-            params![command_message.chat.id, 60i32],
+            params![command_message.chat.id, 60i64],
         )
         .await
         .map_err(|e| format!("getting word counts: {:?}", e))?
         .into_iter()
         .map(|row| (row.get(0), row.get(1)))
-        .collect::<Vec<(String, i32)>>();
+        .collect::<Vec<(String, i64)>>();
 
     if results.is_empty() {
         telegram
@@ -444,9 +444,9 @@ async fn wordcount_graph(
         let padding = 20.0;
         let thickness = 25.0;
         let y_shift = 30.0;
-        let height_unit = 800.0 / f64::from(results[0].1); //Limit height of bar to 800 and have each other bar be a representation of that
+        let height_unit = 800.0 / f64::from(results[0].1 as i32); //Limit height of bar to 800 and have each other bar be a representation of that
         let width = (padding + thickness) * results.len() as f64 + 50.0;
-        let height = (f64::from(results[0].1) * height_unit + 70.0 + y_shift).ceil();
+        let height = (f64::from(results[0].1 as i32) * height_unit + 70.0 + y_shift).ceil();
         let font_size = 15.0;
 
         //Perform this in a block such that the cairo context gets dropped before anything else.
@@ -470,7 +470,7 @@ async fn wordcount_graph(
             for (index, (word, uses)) in results.into_iter().enumerate() {
                 cairo.set_source_rgba(0.5, 0.5, 1.0, 1.0);
                 let x_pos = (thickness + padding) * index as f64 + padding;
-                let bar_height = f64::from(uses) * height_unit;
+                let bar_height = f64::from(uses as i32) * height_unit;
                 cairo.rectangle(x_pos, padding + y_shift, thickness, bar_height);
                 cairo.fill();
 
