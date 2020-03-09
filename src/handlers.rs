@@ -138,6 +138,7 @@ async fn handle_text_reply(
                             command.command_message_id,
                             telegram,
                             context,
+                            None,
                         )
                         .await
                         .map_err(|e| error!("failed to simulate from reply message: {}", e));

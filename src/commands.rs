@@ -197,6 +197,7 @@ async fn simulate_chat(
     chat: &Chat,
     telegram: &Telegram,
     context: &Context,
+    starting_token: Option<&str>,
 ) -> Result<(), String> {
     let key = format!("tg.markovchain.chat.{}:{}", chat.id, order);
     let mut redis = context.redis_pool.get().await;
@@ -253,6 +254,7 @@ async fn simulate_chat(
         chat,
         generate_string_with_minimum_words(
             chain,
+            starting_token,
             context.config.markov.min_words,
             context.config.markov.max_attempts
         )
@@ -270,11 +272,17 @@ async fn simulate_chat(
 
 fn generate_string_with_minimum_words(
     chain: Chain<String>,
+    starting_token: Option<&str>,
     minimum: usize,
     max_attempts: usize,
 ) -> String {
     for i in 0..max_attempts {
-        let out = chain.generate_str();
+        let out = if let Some(ref s) = starting_token {
+            chain.generate_str_from_token(s)
+        } else {
+            chain.generate_str()
+        };
+
         if out.chars().filter(|c| *c == ' ').count() > minimum - 1 {
             info!(
                 "Used {}/{} attempts to generate simulation string",
@@ -285,7 +293,11 @@ fn generate_string_with_minimum_words(
         }
     }
     info!("Used up all simulation attempts!");
-    chain.generate_str()
+    if let Some(ref s) = starting_token {
+        chain.generate_str_from_token(s)
+    } else {
+        chain.generate_str()
+    }
 }
 
 pub async fn simulate(
@@ -295,6 +307,7 @@ pub async fn simulate(
     command_message_id: i64,
     telegram: &Telegram,
     context: &Context,
+    starting_token: Option<&str>,
 ) -> Result<(), String> {
     let key = format!("tg.markovchain.{}.{}:{}", chatid, userid, order);
     let mut redis = context.redis_pool.get().await;
@@ -360,6 +373,7 @@ pub async fn simulate(
         get_user(chatid, userid, telegram, &context.config, &mut redis).await,
         generate_string_with_minimum_words(
             chain,
+            starting_token,
             context.config.markov.min_words,
             context.config.markov.max_attempts
         )
@@ -775,7 +789,8 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         "/quote" => with_user!(ReplyAction::Quote, quote(_, msg.chat.id, msg.id, telegram,context)),
         "/simulate" => match get_order(split.get(2), context) {
             Ok(n) => {
-                with_user!(ReplyAction::Simulate, simulate(_, msg.chat.id, n, msg.id, telegram, context))
+                let starting_token = split.get(3).map(|s| s.as_str());
+                with_user!(ReplyAction::Simulate, simulate(_, msg.chat.id, n, msg.id, telegram, context, starting_token))
             }
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)
@@ -784,7 +799,10 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
                 .map_err(|e| format!("sending invalid order message: {}", e)),
         },
         "/simulatechat" => match get_order(split.get(1), context) {
-            Ok(n) => simulate_chat(n, &msg.chat, telegram, context).await,
+            Ok(n) => {
+                let starting_token = split.get(2).map(|s| s.as_str());
+                simulate_chat(n, &msg.chat, telegram, context, starting_token).await
+            }
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)
                 .await
