@@ -256,8 +256,11 @@ async fn simulate_chat(
             chain,
             starting_token,
             context.config.markov.min_words,
-            context.config.markov.max_attempts
+            context.config.markov.max_attempts,
+            telegram,
+            chat.id
         )
+        .await
     );
 
     //Telegram limits message size
@@ -270,15 +273,19 @@ async fn simulate_chat(
         .map_err(|e| format!("sending simulated string: {}", e))
 }
 
-fn generate_string_with_minimum_words(
+async fn generate_string_with_minimum_words(
     chain: Chain<String>,
     starting_token: Option<&str>,
     minimum: usize,
     max_attempts: usize,
+    //For sending an error message
+    telegram: &Telegram,
+    chat_id: i64,
 ) -> String {
     for i in 0..max_attempts {
         let out = if let Some(ref s) = starting_token {
-            chain.generate_str_from_token(s)
+            let s = s.to_lowercase();
+            chain.generate_str_from_token(&s)
         } else {
             chain.generate_str()
         };
@@ -292,12 +299,19 @@ fn generate_string_with_minimum_words(
             return out;
         }
     }
-    info!("Used up all simulation attempts!");
-    if let Some(ref s) = starting_token {
-        chain.generate_str_from_token(s)
-    } else {
-        chain.generate_str()
+    warn!("Used up all simulation attempts!");
+    if let Some(s) = starting_token {
+        if let Err(e) = telegram
+            .send_message_silent(
+                chat_id,
+                format!("Failed to generate a long enough string from token {}", s),
+            )
+            .await
+        {
+            error!("Failed to send simulation error message: {:?}", e);
+        }
     }
+    chain.generate_str()
 }
 
 pub async fn simulate(
@@ -375,8 +389,11 @@ pub async fn simulate(
             chain,
             starting_token,
             context.config.markov.min_words,
-            context.config.markov.max_attempts
+            context.config.markov.max_attempts,
+            telegram,
+            chatid
         )
+        .await
     );
 
     //Telegram limits message size
@@ -789,8 +806,22 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         "/quote" => with_user!(ReplyAction::Quote, quote(_, msg.chat.id, msg.id, telegram,context)),
         "/simulate" => match get_order(split.get(2), context) {
             Ok(n) => {
-                let starting_token = split.get(3).map(|s| s.as_str());
-                with_user!(ReplyAction::Simulate, simulate(_, msg.chat.id, n, msg.id, telegram, context, starting_token))
+                if split.len() > 3 {
+                    telegram
+                        .send_message_silent(
+                            msg.chat.id,
+                            "Extra argument! Usage: /simulate <username> [<order> [<starting word>]]".to_string(),
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| format!("Sending simulation usage string: {}", e))
+                } else {
+                    let starting_token = split.get(3).map(|s| s.as_str());
+                    with_user!(
+                        ReplyAction::Simulate,
+                        simulate(_, msg.chat.id, n, msg.id, telegram, context, starting_token)
+                    )
+                }
             }
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)
@@ -800,8 +831,19 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         },
         "/simulatechat" => match get_order(split.get(1), context) {
             Ok(n) => {
-                let starting_token = split.get(2).map(|s| s.as_str());
-                simulate_chat(n, &msg.chat, telegram, context, starting_token).await
+                if split.len() > 3 {
+                    telegram
+                      .send_message_silent(
+                          msg.chat.id,
+                          "Extra argument! Usage: /simulate <username> [<order> [<starting word>]]".to_string(),
+                      )
+                      .await
+                      .map(|_| ())
+                      .map_err(|e| format!("Sending simulation usage string: {}", e))
+                } else {
+                    let starting_token = split.get(2).map(|s| s.as_str());
+                    simulate_chat(n, &msg.chat, telegram, context, starting_token).await
+                }
             }
             Err(e) => telegram
                 .send_message_silent(msg.chat.id, e)
