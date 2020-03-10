@@ -304,7 +304,10 @@ async fn generate_string_with_minimum_words(
         if let Err(e) = telegram
             .send_message_silent(
                 chat_id,
-                format!("Failed to generate a long enough string from token {}", s),
+                format!(
+                    "Failed to generate a long enough string from token \"{}\"",
+                    s
+                ),
             )
             .await
         {
@@ -806,11 +809,11 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         "/quote" => with_user!(ReplyAction::Quote, quote(_, msg.chat.id, msg.id, telegram,context)),
         "/simulate" => match get_order(split.get(2), context) {
             Ok(n) => {
-                if split.len() > 3 {
+                if split.len() > 4 {
                     telegram
-                        .send_message_silent(
+                        .send_message_silently_with_markdown(
                             msg.chat.id,
-                            "Extra argument! Usage: /simulate <username> [<order> [<starting word>]]".to_string(),
+                            "Extra argument! Usage: `/simulate <username> [<order> [<starting word>]]`".to_string(),
                         )
                         .await
                         .map(|_| ())
@@ -833,13 +836,14 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
             Ok(n) => {
                 if split.len() > 3 {
                     telegram
-                      .send_message_silent(
-                          msg.chat.id,
-                          "Extra argument! Usage: /simulate <username> [<order> [<starting word>]]".to_string(),
-                      )
-                      .await
-                      .map(|_| ())
-                      .map_err(|e| format!("Sending simulation usage string: {}", e))
+                        .send_message_silently_with_markdown(
+                            msg.chat.id,
+                            "Extra argument! Usage: `/simulatechat [<order>[<starting word>]]`"
+                                .to_string(),
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| format!("Sending simulation usage string: {}", e))
                 } else {
                     let starting_token = split.get(2).map(|s| s.as_str());
                     simulate_chat(n, &msg.chat, telegram, context, starting_token).await
