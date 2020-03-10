@@ -53,8 +53,8 @@ async fn log_message(telegram: &Telegram, msg: &Message, context: &Context) {
         }
         MessageData::Sticker(ref sticker) => {
             let mut redis = context.redis_pool.get().await;
-            let set_name: &str = sticker.set_name.as_ref().map(|s| s.as_str()).unwrap_or("");
-            let emoji: &str = sticker.emoji.as_ref().map(|s| s.as_str()).unwrap_or("");
+            let set_name: &str = sticker.set_name.as_deref().unwrap_or("");
+            let emoji: &str = sticker.emoji.as_deref().unwrap_or("");
             let hash =
                 calculate_sticker_hash(telegram, &mut redis, &sticker.file_id, set_name, emoji)
                     .await;
@@ -189,7 +189,7 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
     match msg.data {
         MessageData::Text(ref text) => {
             //Is command
-            if text.chars().nth(0).unwrap() == '/' {
+            if text.starts_with('/') {
                 handle_command(&msg, text, &telegram, &context).await;
                 should_log = false;
             }
