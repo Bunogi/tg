@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import redis, sys, os, webp
+import redis, sys, os
 from tgs import parsers
 from tgs.exporters.cairo import export_png
 
