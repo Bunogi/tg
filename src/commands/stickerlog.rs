@@ -27,7 +27,7 @@ async fn get_converted_tgs(
         Ok(v)
     } else {
         //No, convert it
-        debug!("Have to convert {} into webp...", file_id);
+        info!("Converting {} into webp...", file_id);
 
         let temp_convert_key = format!("tg.tempconvert.{}", file_id);
 
@@ -50,13 +50,17 @@ async fn get_converted_tgs(
                 .map_err(|e| format!("getting converted png from Redis: {}", e))?
                 .expect("getting png data from key");
 
+            redis
+                .del(temp_convert_key)
+                .await
+                .expect("deleting temporary PNG key");
+
             //Decode PNG into bytes
             let decoder = image::png::PngDecoder::new(png_data.as_slice()).unwrap();
             if decoder.color_type() != image::ColorType::Rgba8 {
                 return Err(format!("Expected Rgba8, got {:?}", decoder.color_type()));
             }
             let (width, height) = decoder.dimensions();
-            dbg!(decoder.total_bytes());
             let mut buf = vec![0; decoder.total_bytes() as usize];
             decoder.read_image(&mut buf).unwrap();
 
