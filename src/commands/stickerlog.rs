@@ -6,8 +6,92 @@ use crate::{
 };
 use cairo::Format;
 use chrono::{prelude::*, NaiveDateTime, Utc};
+use darkredis::Connection;
+use image::ImageDecoder;
 use libc::c_int;
 use tokio::task;
+
+//Convert the .tgs file into a webp and return the bytes.
+async fn get_converted_tgs(
+    context: &Context,
+    redis: &mut Connection,
+    file_id: &str,
+) -> Result<Vec<u8>, String> {
+    //Has it already been converted?
+    let converted_key = format!("tg.conv-animated-sticker.{}", file_id);
+    if let Some(v) = redis
+        .get(&converted_key)
+        .await
+        .map_err(|e| format!("getting converted animated sticker from Redis: {}", e))?
+    {
+        Ok(v)
+    } else {
+        //No, convert it
+        debug!("Have to convert {} into webp...", file_id);
+
+        let temp_convert_key = format!("tg.tempconvert.{}", file_id);
+
+        //Execute tgs->png converter script
+        let child = tokio::process::Command::new("./convert.py")
+            .arg(&context.config.redis.address)
+            .arg(format!("tg.download.{}", file_id))
+            .arg(&temp_convert_key)
+            .spawn();
+        let exit_status = child
+            .map_err(|e| format!("Failed to spawn child: {}", e))?
+            .await
+            .map_err(|e| format!("Convert command failed to run: {}", e))?;
+
+        if exit_status.success() {
+            debug!("Converted .tgs into PNG, now converting to webp...");
+            let png_data = redis
+                .get(&temp_convert_key)
+                .await
+                .map_err(|e| format!("getting converted png from Redis: {}", e))?
+                .expect("getting png data from key");
+
+            //Decode PNG into bytes
+            let decoder = image::png::PngDecoder::new(png_data.as_slice()).unwrap();
+            if decoder.color_type() != image::ColorType::Rgba8 {
+                return Err(format!("Expected Rgba8, got {:?}", decoder.color_type()));
+            }
+            let (width, height) = decoder.dimensions();
+            dbg!(decoder.total_bytes());
+            let mut buf = vec![0; decoder.total_bytes() as usize];
+            decoder.read_image(&mut buf).unwrap();
+
+            let out = unsafe {
+                //Unsafe for FFI with libwebp
+                let (width, height): (c_int, c_int) = (width as i32, height as i32);
+                let mut output: *mut u8 = std::ptr::null_mut();
+                let byte_size = libwebp_sys::WebPEncodeLosslessRGBA(
+                    buf.as_ptr(),
+                    width,
+                    height,
+                    width * 4,
+                    &mut output as *mut *mut u8,
+                );
+                if byte_size == 0 {
+                    return Err("Failed to encode WebP".into());
+                }
+
+                //I'm not sure there's a better way to do this than just copying the memory to make it safe
+                let mut out = vec![0u8; byte_size];
+                std::ptr::copy_nonoverlapping(output, out.as_mut_ptr(), byte_size);
+                libwebp_sys::WebPFree(output as *mut std::ffi::c_void);
+                out
+            };
+            //Store for later
+            redis
+                .set(converted_key, &out)
+                .await
+                .expect("setting converted webp");
+            Ok(out)
+        } else {
+            Err("convert command failed".into())
+        }
+    }
+}
 
 pub async fn stickerlog<'a>(
     msg: &'a Message,
@@ -15,7 +99,7 @@ pub async fn stickerlog<'a>(
     telegram: &Telegram,
     context: &Context,
 ) -> Result<(), String> {
-    let (caption, images, usages) = {
+    let (caption, images, usages, file_ids) = {
         let parsed_time = parse_time(&args[1..]);
         if args.len() > 1 && parsed_time.is_none() {
             telegram
@@ -88,14 +172,23 @@ pub async fn stickerlog<'a>(
         //Get sticker images
         let mut redis = context.redis_pool.get().await;
         let mut images = Vec::new();
-        for f in file_ids {
+        for f in &file_ids {
             let image = telegram
                 .download_file(&mut redis, &f)
                 .await
                 .map_err(|e| format!("downloading file {}: {}", f, e))?;
-            images.push(image);
+
+            //Check for webp/riff header
+            if &image[0..4] != b"RIFF" {
+                debug!("Have to convert animated sticker");
+                let image = get_converted_tgs(context, &mut redis, f).await?;
+                images.push(image);
+            } else {
+                //Image is already a webp, no need to convert
+                images.push(image);
+            }
         }
-        (caption, images, usages)
+        (caption, images, usages, file_ids)
     };
 
     //Actual image rendering
@@ -142,7 +235,7 @@ pub async fn stickerlog<'a>(
                 );
 
                 if image.is_null() {
-                    return Err("decoding webp image".into());
+                    return Err(format!("decoding image {} as webp", file_ids[index]));
                 }
 
                 let len = image_width as usize * image_height as usize * 4;
