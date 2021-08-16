@@ -9,7 +9,8 @@ use chrono::{prelude::*, NaiveDateTime, Utc};
 use darkredis::Connection;
 use image::ImageDecoder;
 use libc::c_int;
-use tokio::task;
+use tokio::{stream::StreamExt, task};
+use tokio_postgres::Client;
 
 //Convert the .tgs file into a webp and return the bytes.
 async fn get_converted_tgs(
@@ -97,6 +98,11 @@ async fn get_converted_tgs(
     }
 }
 
+struct StickerInfo {
+    file_id: String,
+    data: Vec<u8>,
+}
+
 pub async fn stickerlog<'a>(
     msg: &'a Message,
     args: &'a [String],
@@ -162,7 +168,7 @@ pub async fn stickerlog<'a>(
         );
 
         //Image rendering data
-        let (file_ids, usages): (Vec<String>, Vec<i64>) = conn
+        let (hashes, usages): (Vec<Vec<u8>>, Vec<i64>) = conn
             .query(
                 include_sql!("getstickercounts.sql"),
                 params![msg.chat.id, from_time.timestamp()],
@@ -172,6 +178,21 @@ pub async fn stickerlog<'a>(
             .into_iter()
             .map(|row| (row.get(0), row.get::<usize, i64>(1)))
             .unzip();
+
+        let statement = conn
+            .prepare(include_sql!("getstickerfromhash.sql"))
+            .await
+            .unwrap();
+
+        let mut file_ids: Vec<String> = Vec::new();
+        for hash in hashes {
+            let id = conn
+                .query_one(&statement, &[&hash])
+                .await
+                .map(|row| row.get(0))
+                .map_err(|e| format!("getting hash: {}", e))?;
+            file_ids.push(id);
+        }
 
         //Get sticker images
         let mut redis = context.redis_pool.get().await;
