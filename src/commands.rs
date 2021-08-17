@@ -152,7 +152,7 @@ async fn leaderboards<'a>(
     for (user, percentage, count) in edits {
         let appendage = format!(
             "{}: {:.2}% ({})\n",
-            get_user(chatid, user as i64, &telegram, &context.config, &mut redis).await,
+            get_user(chatid, user as i64, telegram, &context.config, &mut redis).await,
             percentage,
             count
         );
@@ -283,7 +283,7 @@ async fn generate_string_with_minimum_words(
     chat_id: i64,
 ) -> String {
     for i in 0..max_attempts {
-        let out = if let Some(ref s) = starting_token {
+        let out = if let Some(s) = starting_token {
             let s = s.to_lowercase();
             chain.generate_str_from_token(&s)
         } else {
@@ -806,7 +806,10 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
     let res = match root {
         "/leaderboards" => leaderboards(msg.chat.id, telegram, context).await,
         "/stickerlog" => stickerlog(msg, &split, telegram, context).await,
-        "/quote" => with_user!(ReplyAction::Quote, quote(_, msg.chat.id, msg.id, telegram,context)),
+        "/quote" => with_user!(
+            ReplyAction::Quote,
+            quote(_, msg.chat.id, msg.id, telegram, context)
+        ),
         "/simulate" => match get_order(split.get(2), context) {
             Ok(n) => {
                 if split.len() > 4 {
@@ -857,7 +860,7 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         },
         "/charcount" => charcount(msg.chat.id, telegram, context).await,
         "/wordcount" => match split.len() {
-            1 => wordcount_graph(&msg, telegram, context).await,
+            1 => wordcount_graph(msg, telegram, context).await,
             2 => wordcount(&split[1], &msg.chat, telegram, context).await,
             _ => telegram
                 .send_message_silent(msg.chat.id, "Invalid number of arguments".to_string())
@@ -869,7 +872,15 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
             use disaster::add_point;
             with_user!(
                 ReplyAction::AddDisasterPoint,
-                add_point(_, msg.from.id, msg.chat.id, msg.id, msg.date, telegram, context)
+                add_point(
+                    _,
+                    msg.from.id,
+                    msg.chat.id,
+                    msg.id,
+                    msg.date,
+                    telegram,
+                    context
+                )
             )
         }
         "/disasterpoints" => disaster::show_points(msg.chat.id, telegram, context).await,

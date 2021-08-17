@@ -22,7 +22,7 @@ fn render_image(stickers_webp: Vec<Vec<u8>>, usages: Vec<i64>) -> Result<Vec<u8>
     let width = usages.len() as i32 * (padding as i32 + sticker_thickness as i32) + 100;
 
     let y_scale = (f64::from(height) - max_height - (padding * 2.0))
-        / f64::from(*usages.iter().max_by(|x, y| x.cmp(&y)).unwrap() as i32);
+        / f64::from(*usages.iter().max_by(|x, y| x.cmp(y)).unwrap() as i32);
 
     let surface = cairo::ImageSurface::create(Format::ARgb32, width, height).unwrap();
     let cairo = cairo::Context::new(&surface);
@@ -52,7 +52,7 @@ fn render_image(stickers_webp: Vec<Vec<u8>>, usages: Vec<i64>) -> Result<Vec<u8>
             );
 
             if image.is_null() {
-                return Err(format!("decoding image as webp"));
+                return Err("decoding image as webp".to_string());
             }
 
             let len = image_width as usize * image_height as usize * 4;

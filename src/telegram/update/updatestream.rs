@@ -27,7 +27,7 @@ pub struct UpdateStream<'a> {
 
 impl<'a> UpdateStream<'a> {
     pub fn new(client: &'a Client, update_url: Url) -> Self {
-        let poll_future = Self::get_poll_future(&client, update_url.clone(), 0).boxed();
+        let poll_future = Self::get_poll_future(client, update_url.clone(), 0).boxed();
 
         Self {
             offset: 1,
@@ -40,17 +40,11 @@ impl<'a> UpdateStream<'a> {
     }
 
     //TODO return proper error type
-    fn get_poll_future(
-        client: &'a Client,
-        url: Url,
-        offset: u64,
-    ) -> impl Future<Output = Result<ApiResponse, ()>> + Send + 'a {
-        async move {
-            let json = serde_json::json!({"offset": offset, "timeout": 6000});
-            let response = client.get(url).json(&json).send().await.unwrap();
+    async fn get_poll_future(client: &'a Client, url: Url, offset: u64) -> Result<ApiResponse, ()> {
+        let json = serde_json::json!({"offset": offset, "timeout": 6000});
+        let response = client.get(url).json(&json).send().await.unwrap();
 
-            response.json::<ApiResponse>().map_err(|_| ()).await
-        }
+        response.json::<ApiResponse>().map_err(|_| ()).await
     }
 }
 
@@ -65,7 +59,7 @@ impl Stream for UpdateStream<'_> {
 
         if !self.poll_running {
             self.poll_future =
-                Self::get_poll_future(&self.client, self.update_url.clone(), self.offset + 1)
+                Self::get_poll_future(self.client, self.update_url.clone(), self.offset + 1)
                     .boxed();
             self.poll_running = true;
         }

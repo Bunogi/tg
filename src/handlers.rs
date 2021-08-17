@@ -16,7 +16,7 @@ pub async fn handle_update(update: Update, telegram: &Telegram, context: &Contex
     use Update::*;
     match update {
         Message(ref msg) => {
-            handle_message(msg, &telegram, context).await;
+            handle_message(msg, telegram, context).await;
         }
         MessageEdited(msg) => {
             let conn = context.db_pool.get().await.unwrap();
@@ -112,7 +112,7 @@ async fn handle_text_reply(
     match redis.get(&key).await {
         Ok(Some(command)) => {
             let command: commands::ReplyCommand = rmp_serde::from_slice(&command).unwrap();
-            let userid = get_user_id(msg.chat.id, &text, &context.db_pool).await;
+            let userid = get_user_id(msg.chat.id, text, &context.db_pool).await;
             if let Some(userid) = userid {
                 match command.action {
                     commands::ReplyAction::Quote => {
@@ -180,17 +180,13 @@ async fn handle_text_reply(
 }
 
 async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
-    //Never log private chats
-    let mut should_log = if let ChatType::Private = msg.chat.kind {
-        false
-    } else {
-        true
-    };
+    let mut should_log = !matches!(msg.chat.kind, ChatType::Private);
+
     match msg.data {
         MessageData::Text(ref text) => {
             //Is command
             if text.starts_with('/') {
-                handle_command(&msg, text, &telegram, &context).await;
+                handle_command(msg, text, telegram, context).await;
                 should_log = false;
             }
         }
@@ -200,7 +196,7 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
                 should_log = false;
                 //Only support text-based reply commands for now
                 if let MessageData::Text(ref text) = **data {
-                    handle_text_reply(text, &telegram, context, msg, other_message).await;
+                    handle_text_reply(text, telegram, context, msg, other_message).await;
                 } else {
                     return;
                 };
@@ -213,9 +209,9 @@ async fn handle_message(msg: &Message, telegram: &Telegram, context: &Context) {
         //Replies should be logged as normal messages for now
         if let MessageData::Reply(ref data, _) = msg.data {
             let message = msg.with_data(data);
-            log_message(&telegram, &message, &context).await;
+            log_message(telegram, &message, context).await;
         } else {
-            log_message(&telegram, msg, &context).await;
+            log_message(telegram, msg, context).await;
         }
     }
 

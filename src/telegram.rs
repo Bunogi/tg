@@ -408,7 +408,7 @@ impl Telegram {
         #[derive(Deserialize)]
         struct Response {
             result: RespResult,
-        };
+        }
 
         self.client
             .get(url)
