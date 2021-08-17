@@ -130,10 +130,10 @@ pub async fn calculate_sticker_hash(
                 .download_file(&mut redis, file_id)
                 .await
                 .map_err(|_| ())?;
-            hasher.input(&sticker_file);
-            hasher.input(set_name);
-            hasher.input(emoji);
-            let result = hasher.result();
+            hasher.update(&sticker_file);
+            hasher.update(set_name);
+            hasher.update(emoji);
+            let result = hasher.finalize();
             let res = result.as_slice();
             let command = darkredis::Command::new("HSET")
                 .arg(b"tg.sticker.hashes")
