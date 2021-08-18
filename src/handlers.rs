@@ -123,11 +123,11 @@ async fn handle_text_reply(
                             telegram,
                             context,
                         )
-                        .await
-                        .map_err(|e| error!("failed to quote from reply message: {}", e));
+                        .await;
 
-                        if res.is_ok() {
-                            commands::log_command("quote", context, msg).await;
+                        match res {
+                            Err(e) => error!("failed to quote from reply message: {}", e),
+                            Ok(_) => commands::log_command("quote", context, msg).await,
                         }
                     }
                     commands::ReplyAction::Simulate => {
@@ -140,11 +140,11 @@ async fn handle_text_reply(
                             context,
                             None,
                         )
-                        .await
-                        .map_err(|e| error!("failed to simulate from reply message: {}", e));
+                        .await;
 
-                        if res.is_ok() {
-                            commands::log_command("simulate", context, msg).await;
+                        match res {
+                            Ok(()) => commands::log_command("simulate", context, msg).await,
+                            Err(e) => error!("failed to simulate from reply message: {}", e),
                         }
                     }
                     commands::ReplyAction::AddDisasterPoint => {
@@ -157,13 +157,13 @@ async fn handle_text_reply(
                             telegram,
                             context,
                         )
-                        .await
-                        .map_err(|e| {
-                            error!("failed to add a disaster point from reply message: {}", e)
-                        });
+                        .await;
 
-                        if res.is_ok() {
-                            commands::log_command("disaster", context, msg).await;
+                        match res {
+                            Ok(()) => commands::log_command("disaster", context, msg).await,
+                            Err(e) => {
+                                error!("failed to add a disaster point from reply message: {}", e)
+                            }
                         }
                     }
                 }
