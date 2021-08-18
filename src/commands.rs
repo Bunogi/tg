@@ -12,8 +12,7 @@ use cairo::Format;
 use chrono::{prelude::*, Utc};
 use markov::Chain;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt;
+use std::{collections::HashMap, fmt};
 use tokio::task;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -191,6 +190,29 @@ fn merge_messages(messages: &[MessageData], mut index: usize) -> (usize, String)
     (index, output)
 }
 
+fn convert_msgs_to_lowercase(messages: &mut [MessageData]) {
+    for m in messages.iter_mut() {
+        if !m.message.contains("https://") && !m.message.contains("http://") {
+            m.message.make_ascii_lowercase();
+            continue;
+        }
+
+        let mut output = String::with_capacity(m.message.len());
+        for (index, word) in m.message.split_whitespace().enumerate() {
+            if index > 0 {
+                output += " ";
+            }
+            // Try to preserve links
+            if word.starts_with("http://") || word.starts_with("https://") {
+                output += word;
+            } else {
+                output += &word.to_ascii_lowercase();
+            }
+        }
+        m.message = output;
+    }
+}
+
 //This function is almost identical to simulate except it creates a chain with messages from every user and not just one
 async fn simulate_chat(
     order: usize,
@@ -212,7 +234,7 @@ async fn simulate_chat(
             //Create a new chain
             let mut chain = Chain::of_order(order);
             let conn = context.db_pool.get().await.unwrap();
-            let messages = conn
+            let mut messages = conn
                 .query(include_sql!("getmessagetext.sql"), params![chat.id])
                 .await
                 .map_err(|e| format!("getting user message text: {:?}", e))?
@@ -231,6 +253,8 @@ async fn simulate_chat(
                     .map(|_| ())
                     .map_err(|e| format!("sending no messages exist message: {}", e));
             }
+
+            convert_msgs_to_lowercase(&mut messages);
 
             let mut i = 0;
             while i < messages.len() {
@@ -340,7 +364,7 @@ pub async fn simulate(
             let mut chain = Chain::of_order(order);
             let conn = context.db_pool.get().await.unwrap();
 
-            let messages = conn
+            let mut messages = conn
                 .query(include_sql!("getmessagetext.sql"), params![chatid])
                 .await
                 .map_err(|e| format!("getting user message text: {:?}", e))?
@@ -363,6 +387,8 @@ pub async fn simulate(
                     .map(|_| ())
                     .map_err(|e| format!("sending no messages exist message: {}", e));
             }
+
+            convert_msgs_to_lowercase(&mut messages);
 
             let mut i = 0;
             while i < messages.len() {
