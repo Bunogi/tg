@@ -213,29 +213,28 @@ fn convert_msgs_to_lowercase(messages: &mut [MessageData]) {
     }
 }
 
-//This function is almost identical to simulate except it creates a chain with messages from every user and not just one
-async fn simulate_chat(
+async fn get_simulate_chat_chain(
+    chatid: i64,
     order: usize,
-    chat: &Chat,
-    telegram: &Telegram,
     context: &Context,
-    starting_token: Option<&str>,
-) -> Result<(), String> {
-    let key = format!("tg.markovchain.chat.{}:{}", chat.id, order);
+) -> Result<Option<Chain<String>>, String> {
+    let key = format!("tg.markovchain.chat.{}:{}", chatid, order);
     let mut redis = context.redis_pool.get().await;
-    let chain = match redis.get(&key).await {
+    match redis.get(&key).await {
         Ok(Some(ref s)) => {
+            debug!("Found cached simulatechat chain at {}", key);
             //A cached version exists, use that
             let value: Chain<String> = rmp_serde::from_slice(s)
                 .map_err(|e| format!("deserializing markov chain at {}: {}", key, e))?;
-            Ok(value)
+            Ok(Some(value))
         }
         Ok(None) => {
+            debug!("No cache chain at {}, generating a new one...", key);
             //Create a new chain
             let mut chain = Chain::of_order(order);
             let conn = context.db_pool.get().await.unwrap();
             let mut messages = conn
-                .query(include_sql!("getmessagetext.sql"), params![chat.id])
+                .query(include_sql!("getmessagetext.sql"), params![chatid])
                 .await
                 .map_err(|e| format!("getting user message text: {:?}", e))?
                 .into_iter()
@@ -247,11 +246,7 @@ async fn simulate_chat(
                 .collect::<Vec<MessageData>>();
 
             if messages.is_empty() {
-                return telegram
-                    .send_message_silent(chat.id, "Error: No logged messages in this chat".into())
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| format!("sending no messages exist message: {}", e));
+                return Ok(None);
             }
 
             convert_msgs_to_lowercase(&mut messages);
@@ -268,10 +263,29 @@ async fn simulate_chat(
                 .set_and_expire_seconds(&key, serialized, context.config.cache.markov_chain as u32)
                 .await
                 .unwrap();
-            Ok(chain)
+            Ok(Some(chain))
         }
         Err(e) => Err(format!("redis failure getting markov chain data: {}", e)),
-    }?;
+    }
+}
+
+//This function is almost identical to simulate except it creates a chain with messages from every user and not just one
+async fn simulate_chat(
+    order: usize,
+    chat: &Chat,
+    telegram: &Telegram,
+    context: &Context,
+    starting_token: Option<&str>,
+) -> Result<(), String> {
+    let chain = if let Some(s) = get_simulate_chat_chain(chat.id, order, context).await? {
+        s
+    } else {
+        return telegram
+            .send_message_silent(chat.id, "No logged messages in this chat".to_string())
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("sending no logged messages message: {}", e));
+    };
 
     let mut output = format!(
         "Simulated {}: {}",
@@ -339,6 +353,79 @@ async fn generate_string_with_minimum_words(
         }
     }
     chain.generate_str()
+}
+
+async fn generate_string_with_exact_words(
+    chain: &Chain<String>,
+    wanted_size: usize,
+    max_attempts: usize,
+    //For sending an error message
+    telegram: &Telegram,
+    chat_id: i64,
+) -> Option<String> {
+    for i in 0..max_attempts {
+        let generated = chain.generate_str();
+
+        if generated.split_whitespace().count() == wanted_size {
+            info!(
+                "Used {}/{} attempts to generate simulation string",
+                i + 1,
+                max_attempts
+            );
+            return Some(generated);
+        }
+    }
+    warn!("Used up all simulation attempts!");
+    if let Err(e) = telegram
+        .send_message_silent(chat_id, "Failed to generate message".to_string())
+        .await
+    {
+        error!("Failed to send generation error message: {:?}", e);
+    }
+    None
+}
+
+async fn haiku(
+    chat: &Chat,
+    order: usize,
+    telegram: &Telegram,
+    context: &Context,
+) -> Result<(), String> {
+    let chain = get_simulate_chat_chain(chat.id, order, context).await?;
+    if chain.is_none() {
+        return telegram
+            .send_message_silent(chat.id, "No messages logged in this chat".into())
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("Replying with error: {}", e));
+    }
+
+    let chain = chain.unwrap();
+
+    let mut poem = format!("A haiku, written by {}:\n```\n", chat);
+    for size in [3, 3, 3] {
+        match generate_string_with_exact_words(
+            &chain,
+            size,
+            context.config.markov.max_attempts,
+            telegram,
+            chat.id,
+        )
+        .await
+        {
+            Some(s) => {
+                poem += &s;
+                poem += "\n";
+            }
+            None => return Ok(()),
+        }
+    }
+    poem += "```";
+
+    telegram
+        .send_message_silently_with_markdown(chat.id, poem)
+        .await
+        .map(|_| ())
 }
 
 pub async fn simulate(
@@ -828,7 +915,6 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
         };
     }
 
-    //Potential improvement: ignore handling commands in private chats since they are explicitly not logged anyway
     let res = match root {
         "/leaderboards" => leaderboards(msg.chat.id, telegram, context).await,
         "/stickerlog" => stickerlog(msg, &split, telegram, context).await,
@@ -836,6 +922,14 @@ pub async fn handle_command(msg: &Message, msg_text: &str, telegram: &Telegram, 
             ReplyAction::Quote,
             quote(_, msg.chat.id, msg.id, telegram, context)
         ),
+        "/haiku" => match get_order(split.get(1), context) {
+            Ok(order) => haiku(&msg.chat, order, telegram, context).await,
+            Err(e) => telegram
+                .send_message_silent(msg.chat.id, e)
+                .await
+                .map(|_| ())
+                .map_err(|e| format!("sending invalid order string: {}", e)),
+        },
         "/simulate" => match get_order(split.get(2), context) {
             Ok(n) => {
                 if split.len() > 4 {
