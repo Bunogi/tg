@@ -229,7 +229,7 @@ async fn get_simulate_chat_chain(
             Ok(Some(value))
         }
         Ok(None) => {
-            debug!("No cache chain at {}, generating a new one...", key);
+            debug!("No cached chain at {}, generating a new one...", key);
             //Create a new chain
             let mut chain = Chain::of_order(order);
             let conn = context.db_pool.get().await.unwrap();
@@ -403,7 +403,7 @@ async fn haiku(
     let chain = chain.unwrap();
 
     let mut poem = format!("A haiku, written by {}:\n```\n", chat);
-    for size in [3, 3, 3] {
+    for size in [5, 7, 5] {
         match generate_string_with_exact_words(
             &chain,
             size,
@@ -428,25 +428,24 @@ async fn haiku(
         .map(|_| ())
 }
 
-pub async fn simulate(
+async fn get_simulate_chain(
     userid: i64,
     chatid: i64,
     order: usize,
-    command_message_id: i64,
-    telegram: &Telegram,
     context: &Context,
-    starting_token: Option<&str>,
-) -> Result<(), String> {
+    redis: &mut darkredis::Connection,
+) -> Result<Option<Chain<String>>, String> {
     let key = format!("tg.markovchain.{}.{}:{}", chatid, userid, order);
-    let mut redis = context.redis_pool.get().await;
-    let chain = match redis.get(&key).await {
+    match redis.get(&key).await {
         Ok(Some(s)) => {
+            debug!("Found cached simulate chain at {}", key);
             //A cached version exists, use that
             let value: Chain<String> = rmp_serde::from_slice(&s)
                 .map_err(|e| format!("deserializing markov chain at {}: {}", key, e))?;
-            Ok(value)
+            Ok(Some(value))
         }
         Ok(None) => {
+            debug!("No cached chain at {}, generating a new one...", key);
             //Create a new chain
             let mut chain = Chain::of_order(order);
             let conn = context.db_pool.get().await.unwrap();
@@ -464,15 +463,7 @@ pub async fn simulate(
                 .collect::<Vec<MessageData>>();
 
             if messages.is_empty() {
-                return telegram
-                    .reply_and_close_keyboard(
-                        command_message_id,
-                        chatid,
-                        "Error: No logged messages in this chat".into(),
-                    )
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| format!("sending no messages exist message: {}", e));
+                return Ok(None);
             }
 
             convert_msgs_to_lowercase(&mut messages);
@@ -493,10 +484,36 @@ pub async fn simulate(
                 .set_and_expire_seconds(&key, &serialized, context.config.cache.markov_chain as u32)
                 .await
                 .unwrap();
-            Ok(chain)
+            Ok(Some(chain))
         }
         Err(e) => Err(format!("redis failure getting markov chain data: {}", e)),
-    }?;
+    }
+}
+
+pub async fn simulate(
+    userid: i64,
+    chatid: i64,
+    order: usize,
+    command_message_id: i64,
+    telegram: &Telegram,
+    context: &Context,
+    starting_token: Option<&str>,
+) -> Result<(), String> {
+    let mut redis = context.redis_pool.get().await;
+    let chain =
+        if let Some(s) = get_simulate_chain(userid, chatid, order, context, &mut redis).await? {
+            s
+        } else {
+            return telegram
+                .reply_and_close_keyboard(
+                    command_message_id,
+                    chatid,
+                    "Error: No logged messages in this chat".into(),
+                )
+                .await
+                .map(|_| ())
+                .map_err(|e| format!("sending no messages exist message: {}", e));
+        };
 
     let mut output = format!(
         "{}<s>: {}",
