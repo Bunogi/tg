@@ -6,8 +6,8 @@ use futures::{
 };
 use reqwest::{Client, Url};
 use serde::Deserialize;
-use std::collections::VecDeque;
 use std::pin::Pin;
+use std::{collections::VecDeque, convert::TryInto};
 
 #[derive(Debug, Deserialize)]
 struct ApiResponse {
@@ -52,9 +52,14 @@ impl Stream for UpdateStream<'_> {
     type Item = Update;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        if !self.cached_updates.is_empty() {
-            let popped = self.cached_updates.pop_front().unwrap();
-            return Poll::Ready(Some(popped.into()));
+        while !self.cached_updates.is_empty() {
+            let popped = self.cached_updates.pop_front().unwrap().try_into();
+
+            if let Ok(inner) = popped {
+                return Poll::Ready(Some(inner));
+            } else {
+                warn!("Ignored APIUpdate {:?}", popped);
+            }
         }
 
         if !self.poll_running {

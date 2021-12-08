@@ -2,7 +2,7 @@ mod updatestream;
 pub use updatestream::UpdateStream;
 
 use super::{message::Message, ApiUpdate};
-use std::convert::From;
+use std::convert::TryFrom;
 
 #[derive(Debug)]
 pub enum Update {
@@ -12,18 +12,20 @@ pub enum Update {
     ChannelPostEdited(Message),
 }
 
-impl From<ApiUpdate> for Update {
-    fn from(from: ApiUpdate) -> Self {
+impl TryFrom<ApiUpdate> for Update {
+    type Error = ();
+
+    fn try_from(from: ApiUpdate) -> Result<Self, Self::Error> {
         if let Some(msg) = from.message {
-            Update::Message(msg.into())
+            Ok(Update::Message(msg.into()))
         } else if let Some(msg) = from.edited_message {
-            Update::MessageEdited(msg.into())
+            Ok(Update::MessageEdited(msg.into()))
         } else if let Some(msg) = from.channel_post {
-            Update::ChannelPost(msg.into())
+            Ok(Update::ChannelPost(msg.into()))
         } else if let Some(msg) = from.edited_channel_post {
-            Update::ChannelPostEdited(msg.into())
+            Ok(Update::ChannelPostEdited(msg.into()))
         } else {
-            panic!("Invalid ApiUpdate: {:?}", from)
+            Err(())
         }
     }
 }
