@@ -2,7 +2,7 @@
 extern crate log;
 
 use crate::telegram::Telegram;
-use deadpool_postgres::{Manager, Pool};
+use deadpool_postgres::Pool;
 use futures::stream::StreamExt;
 use serde::Deserialize;
 use std::{fs::File, io::Read, path::Path, process::exit};
@@ -100,7 +100,7 @@ async fn real_main() -> std::io::Result<()> {
     info!("File loaded!");
 
     //maximum number of connections to redis and the database
-    let max_connections = num_cpus::get();
+    let max_connections = num_cpus::get() * 4;
     info!("Using {} pooled connections", max_connections);
     info!("Opening Redis connections...");
     let address = &config.redis.address;
@@ -125,10 +125,16 @@ async fn real_main() -> std::io::Result<()> {
     if let Some(ref p) = &config.postgres.password {
         postgres_config.password(p);
     }
-    let db_pool = Pool::new(
-        Manager::new(postgres_config, tokio_postgres::NoTls),
-        max_connections,
-    );
+
+    let mgr_config = deadpool_postgres::ManagerConfig {
+        recycling_method: deadpool_postgres::RecyclingMethod::Fast,
+    };
+    let mgr =
+        deadpool_postgres::Manager::from_config(postgres_config, tokio_postgres::NoTls, mgr_config);
+    let db_pool = deadpool_postgres::Pool::builder(mgr)
+        .max_size(max_connections)
+        .build()
+        .unwrap();
 
     {
         info!("Creating tables if necesarry...");
