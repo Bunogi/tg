@@ -23,7 +23,7 @@ pub use stickerlog::stickerlog;
 
 pub async fn log_command(command: &str, context: &Context, message: &Message) {
     debug!("command is {}", command);
-    let time: DateTime<Local> = Utc.timestamp(message.date, 0).into();
+    let time: DateTime<Local> = Utc.timestamp_opt(message.date, 0).unwrap().into();
     let mut conn = context.db_pool.get().await.unwrap();
     let tx = conn.transaction().await.unwrap();
     //Register function
@@ -93,7 +93,7 @@ async fn leaderboards<'a>(
         .map(|row| (row.get(0), row.get(1)))
         .map_err(|e| format!("getting message data: {:?}", e))?;
 
-    let since = chrono::Local.timestamp(since as i64, 0);
+    let since = chrono::Local.timestamp_opt(since, 0).unwrap();
     let mut redis = context.redis_pool.get().await;
 
     //Message counts
@@ -104,7 +104,7 @@ async fn leaderboards<'a>(
         //whatever reason
         let appendage = format!(
             "{} is the most annoying having sent {} messages!\n",
-            get_user(chatid, user as i64, telegram, &context.config, &mut redis).await,
+            get_user(chatid, user, telegram, &context.config, &mut redis).await,
             count
         );
 
@@ -116,7 +116,7 @@ async fn leaderboards<'a>(
     for m in messages {
         let appendage = format!(
             "{}: {} messages\n",
-            get_user(chatid, m.0 as i64, telegram, &context.config, &mut redis).await,
+            get_user(chatid, m.0, telegram, &context.config, &mut redis).await,
             m.1
         );
         table += &appendage;
@@ -151,7 +151,7 @@ async fn leaderboards<'a>(
     for (user, percentage, count) in edits {
         let appendage = format!(
             "{}: {:.2}% ({})\n",
-            get_user(chatid, user as i64, telegram, &context.config, &mut redis).await,
+            get_user(chatid, user, telegram, &context.config, &mut redis).await,
             percentage,
             count
         );
@@ -556,7 +556,10 @@ pub async fn quote(
         .map(|row| (row.get(0), row.get(1)))
         .map_err(|e| format!("getting random quote: {:?}", e))?;
 
-    let date: DateTime<Local> = Utc.timestamp(timestamp as i64, 0).with_timezone(&Local);
+    let date: DateTime<Local> = Utc
+        .timestamp_opt(timestamp, 0)
+        .unwrap()
+        .with_timezone(&Local);
 
     let mut redis = context.redis_pool.get().await;
 

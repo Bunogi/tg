@@ -11,7 +11,6 @@ use std::{collections::VecDeque, convert::TryInto};
 
 #[derive(Debug, Deserialize)]
 struct ApiResponse {
-    ok: bool,
     #[serde(rename = "result")]
     updates: VecDeque<ApiUpdate>,
 }

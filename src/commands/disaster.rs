@@ -21,7 +21,7 @@ pub async fn add_point(
     telegram: &Telegram,
     context: &Context,
 ) -> Result<(), String> {
-    if giverid as i64 == receiverid {
+    if giverid == receiverid {
         return telegram
             .send_message_silent(chatid, "Cannot give a disaster point to yourself!".into())
             .await
@@ -193,7 +193,10 @@ pub async fn show_points(
                 crate::util::get_user(chatid, entry.to, telegram, &context.config, &mut redis)
                     .await;
 
-            let utc = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(entry.utc, 0), Utc);
+            let utc = DateTime::<Utc>::from_utc(
+                NaiveDateTime::from_timestamp_opt(entry.utc, 0).unwrap(),
+                Utc,
+            );
             let time_string = utc.with_timezone(&Local).format("%e %B %k:%M %:z");
 
             let appendage = format!("[{}] {} -> {}\n", time_string, giver, sender);

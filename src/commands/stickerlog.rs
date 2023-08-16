@@ -130,7 +130,9 @@ pub async fn stickerlog<'a>(
         }
         let from_time: DateTime<Utc> = match parsed_time {
             Some(t) => Utc::now() - t,
-            None => DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc),
+            None => {
+                DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp_opt(0, 0).unwrap(), Utc)
+            }
         };
 
         let conn = context.db_pool.get().await.unwrap();

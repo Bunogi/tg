@@ -107,7 +107,7 @@ pub unsafe fn rgba_to_cairo(mut ptr: *mut u8, len: usize) {
 
 pub async fn calculate_sticker_hash(
     telegram: &Telegram,
-    mut redis: &mut darkredis::Connection,
+    redis: &mut darkredis::Connection,
     file_id: &str,
     set_name: &str,
     emoji: &str,
@@ -127,7 +127,7 @@ pub async fn calculate_sticker_hash(
             let mut hasher = Md5::new();
             //Logging this failure is not needed since download_file will log failed downloads anyway
             let sticker_file = telegram
-                .download_file(&mut redis, file_id)
+                .download_file(redis, file_id)
                 .await
                 .map_err(|_| ())?;
             hasher.update(&sticker_file);

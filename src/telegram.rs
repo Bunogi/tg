@@ -7,7 +7,6 @@ use futures::prelude::*;
 use message::Message;
 use reqwest::{multipart, Client, Url};
 use serde::Deserialize;
-use serde_json::Value;
 use std::fmt;
 use update::UpdateStream;
 use user::User;
@@ -18,7 +17,6 @@ struct ApiChat {
     #[serde(rename = "type")]
     chat_type: String,
     title: Option<String>,
-    username: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,18 +26,6 @@ struct ApiUpdate {
     edited_message: Option<ApiMessage>,
     channel_post: Option<ApiMessage>,
     edited_channel_post: Option<ApiMessage>,
-
-    // Not supported yet
-    inline_query: Option<Value>,
-    chosen_inline_result: Option<Value>,
-    callback_query: Option<Value>,
-    shipping_query: Option<Value>,
-    pre_checkout_query: Option<Value>,
-    poll: Option<Value>,
-    poll_answer: Option<Value>,
-    my_chat_member: Option<Value>,
-    chat_member: Option<Value>,
-    chat_join_request: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
