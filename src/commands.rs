@@ -579,6 +579,74 @@ pub async fn quote(
         .map_err(|e| format!("sending qoute: {}", e))
 }
 
+fn render_wordcounts_to_surface(
+    words: &[(String, i64)],
+) -> Result<cairo::ImageSurface, cairo::Error> {
+    //Initialize image with some constants
+    let padding = 20.0;
+    let thickness = 25.0;
+    let y_shift = 30.0;
+    let height_unit = 800.0 / f64::from(words[0].1 as i32); //Limit height of bar to 800 and have each other bar be a representation of that
+    let width = (padding + thickness) * words.len() as f64 + 50.0;
+    let height = (f64::from(words[0].1 as i32) * height_unit + 70.0 + y_shift).ceil();
+    let font_size = 15.0;
+
+    let surface = cairo::ImageSurface::create(Format::ARgb32, width as i32, height as i32)?;
+    let cairo = cairo::Context::new(&surface)?;
+    cairo.scale(1.0, 1.0);
+
+    #[allow(clippy::unnecessary_cast)]
+    cairo.set_source_rgba(
+        0x2E as f64 / 0xFF as f64,
+        0x2E as f64 / 0xFF as f64,
+        0x2E as f64 / 0xFF as f64,
+        1.0,
+    );
+    cairo.rectangle(0.0, 0.0, width, height);
+    cairo.fill()?;
+
+    for (index, (word, uses)) in words.iter().enumerate() {
+        cairo.set_source_rgba(0.5, 0.5, 1.0, 1.0);
+        let x_pos = (thickness + padding) * index as f64 + padding;
+        let bar_height = f64::from(*uses as i32) * height_unit;
+        cairo.rectangle(x_pos, padding + y_shift, thickness, bar_height);
+        cairo.fill()?;
+
+        //Render the text
+        cairo.select_font_face("Hack", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+        cairo.set_font_size(font_size);
+        cairo.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+
+        //Number
+        let number_y_position = bar_height + 5.0 + y_shift + padding + font_size;
+        let number_text = uses.to_string();
+        // let extends = cairo.text_extents(&number_text);
+        cairo.move_to(x_pos, number_y_position);
+        cairo.show_text(&number_text)?;
+
+        //Stagger the text in order make the words more readable
+        let text_y_position = font_size
+            + if index % 2 == 0 {
+                y_shift
+            } else {
+                y_shift / 2.0
+            };
+        cairo.move_to(x_pos, text_y_position);
+        cairo.show_text(word)?;
+    }
+    Ok(surface)
+}
+
+fn render_wordcounts(words: &[(String, i64)]) -> Result<Vec<u8>, String> {
+    let surface =
+        render_wordcounts_to_surface(words).map_err(|e| format!("Cairo error: {:?}", e))?;
+    let mut rendered_image = Vec::new();
+    surface
+        .write_to_png(&mut rendered_image)
+        .map_err(|e| format!("Writing as PNG failed: {:?}", e))?;
+    Ok(rendered_image)
+}
+
 async fn wordcount_graph(
     command_message: &Message,
     telegram: &Telegram,
@@ -597,7 +665,7 @@ async fn wordcount_graph(
         .collect::<Vec<(String, i64)>>();
 
     if results.is_empty() {
-        telegram
+        return telegram
             .reply_to(
                 command_message.id,
                 command_message.chat.id,
@@ -605,75 +673,16 @@ async fn wordcount_graph(
             )
             .await
             .map(|_| ())
-            .map_err(|e| format!("sending log error message: {}", e))
-    } else {
-        //Initialize image with some constants
-        let padding = 20.0;
-        let thickness = 25.0;
-        let y_shift = 30.0;
-        let height_unit = 800.0 / f64::from(results[0].1 as i32); //Limit height of bar to 800 and have each other bar be a representation of that
-        let width = (padding + thickness) * results.len() as f64 + 50.0;
-        let height = (f64::from(results[0].1 as i32) * height_unit + 70.0 + y_shift).ceil();
-        let font_size = 15.0;
-
-        //Perform this in a block such that the cairo context gets dropped before anything else.
-        //Without this, this future won't be Sync.
-        let rendered_image = task::block_in_place(|| {
-            let surface =
-                cairo::ImageSurface::create(Format::ARgb32, width as i32, height as i32).unwrap();
-            let cairo = cairo::Context::new(&surface);
-            cairo.scale(1.0, 1.0);
-
-            #[allow(clippy::unnecessary_cast)]
-            cairo.set_source_rgba(
-                0x2E as f64 / 0xFF as f64,
-                0x2E as f64 / 0xFF as f64,
-                0x2E as f64 / 0xFF as f64,
-                1.0,
-            );
-            cairo.rectangle(0.0, 0.0, width, height);
-            cairo.fill();
-
-            for (index, (word, uses)) in results.into_iter().enumerate() {
-                cairo.set_source_rgba(0.5, 0.5, 1.0, 1.0);
-                let x_pos = (thickness + padding) * index as f64 + padding;
-                let bar_height = f64::from(uses as i32) * height_unit;
-                cairo.rectangle(x_pos, padding + y_shift, thickness, bar_height);
-                cairo.fill();
-
-                //Render the text
-                cairo.select_font_face("Hack", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
-                cairo.set_font_size(font_size);
-                cairo.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-
-                //Number
-                let number_y_position = bar_height + 5.0 + y_shift + padding + font_size;
-                let number_text = uses.to_string();
-                // let extends = cairo.text_extents(&number_text);
-                cairo.move_to(x_pos, number_y_position);
-                cairo.show_text(&number_text);
-
-                //Stagger the text in order make the words more readable
-                let text_y_position = font_size
-                    + if index % 2 == 0 {
-                        y_shift
-                    } else {
-                        y_shift / 2.0
-                    };
-                cairo.move_to(x_pos, text_y_position);
-                cairo.show_text(&word);
-            }
-
-            let mut rendered_image = Vec::new();
-            surface.write_to_png(&mut rendered_image).unwrap();
-            rendered_image
-        });
-        telegram
-            .send_png_lossless(command_message.chat.id, rendered_image, None, true)
-            .await
-            .map(|_| ())
-            .map_err(|_| "sending rendered image".to_string())
+            .map_err(|e| format!("sending log error message: {}", e));
     }
+    //Perform this in a block such that the cairo context gets dropped before anything else.
+    //Without this, this future won't be Sync.
+    let image = task::block_in_place(|| render_wordcounts(&results))?;
+    telegram
+        .send_png_lossless(command_message.chat.id, image, None, true)
+        .await
+        .map(|_| ())
+        .map_err(|_| "sending rendered image".to_string())
 }
 
 async fn wordcount(

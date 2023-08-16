@@ -9,7 +9,58 @@ use chrono::{prelude::*, NaiveDateTime, Utc};
 use libc::c_int;
 use tokio::task;
 
+struct Image {
+    data: *mut u8,
+    size: usize,
+    width: i32,
+    height: i32,
+}
+
+fn decode_webp(input: &[u8]) -> Result<Image, String> {
+    let mut width: c_int = 0;
+    let mut height: c_int = 0;
+    unsafe {
+        let data = libwebp_sys::WebPDecodeRGBA(
+            input.as_ptr(),
+            input.len(),
+            &mut width as *mut c_int,
+            &mut height as *mut c_int,
+        );
+
+        if data.is_null() {
+            return Err("decoding image as webp".to_string());
+        }
+        let size = width as usize * height as usize * 4; // RGBA
+        Ok(Image {
+            data,
+            size,
+            width,
+            height,
+        })
+    }
+}
+
 fn render_image(stickers_webp: Vec<Vec<u8>>, usages: Vec<i64>) -> Result<Vec<u8>, String> {
+    let decoded = stickers_webp
+        .into_iter()
+        .map(|s| decode_webp(&s))
+        .collect::<Result<Vec<Image>, String>>()?;
+    unsafe {
+        decoded
+            .iter()
+            .for_each(|image| rgba_to_cairo(image.data, image.size));
+    }
+
+    let retval = render_image_inner(&decoded, usages);
+
+    decoded.iter().for_each(|i| unsafe {
+        libwebp_sys::WebPFree(i.data as *mut std::ffi::c_void);
+    });
+
+    retval.map_err(|e| format!("Cairo error {:?}\n", e))
+}
+
+fn render_image_inner(stickers: &[Image], usages: Vec<i64>) -> Result<Vec<u8>, cairo::Error> {
     let mut rendered_image = Vec::new();
 
     //Fun constants to play with
@@ -24,8 +75,8 @@ fn render_image(stickers_webp: Vec<Vec<u8>>, usages: Vec<i64>) -> Result<Vec<u8>
     let y_scale = (f64::from(height) - max_height - (padding * 2.0))
         / f64::from(*usages.iter().max_by(|x, y| x.cmp(y)).unwrap() as i32);
 
-    let surface = cairo::ImageSurface::create(Format::ARgb32, width, height).unwrap();
-    let cairo = cairo::Context::new(&surface);
+    let surface = cairo::ImageSurface::create(Format::ARgb32, width, height)?;
+    let cairo = cairo::Context::new(&surface)?;
     cairo.scale(1.0, 1.0);
 
     #[allow(clippy::unnecessary_cast)]
@@ -36,80 +87,59 @@ fn render_image(stickers_webp: Vec<Vec<u8>>, usages: Vec<i64>) -> Result<Vec<u8>
         1.0,
     );
     cairo.rectangle(0.0, 0.0, f64::from(width), f64::from(height));
-    cairo.fill();
+    cairo.fill()?;
 
     for (index, num) in usages.iter().enumerate() {
-        unsafe {
-            //Stickers are always webp
-            let current_image = &stickers_webp[index];
-            let mut image_width: c_int = 0;
-            let mut image_height: c_int = 0;
-            let image = libwebp_sys::WebPDecodeRGBA(
-                current_image.as_ptr(),
-                current_image.len(),
-                &mut image_width as *mut c_int,
-                &mut image_height as *mut c_int,
-            );
+        let image = &stickers[index];
+        let slice = unsafe { std::slice::from_raw_parts_mut(image.data, image.size) };
 
-            if image.is_null() {
-                return Err("decoding image as webp".to_string());
-            }
+        let format = Format::ARgb32;
+        let stride = format.stride_for_width(image.width as u32)?;
+        let surface =
+            cairo::ImageSurface::create_for_data(slice, format, image.width, image.height, stride)?;
 
-            let len = image_width as usize * image_height as usize * 4;
-            rgba_to_cairo(image, len); //Cairo is bgra on little-endian machines
-            let slice = std::slice::from_raw_parts_mut(image, len);
-            let format = Format::ARgb32;
-            let stride = format.stride_for_width(image_width as u32).unwrap();
-            let surface = cairo::ImageSurface::create_for_data(
-                slice,
-                format,
-                image_width,
-                image_height,
-                stride,
-            )
-            .unwrap();
+        let x_offset = index as f64 * (sticker_thickness + padding);
+        //Decrease the sticker size until they match the target thickness or maximum height
+        let scale_factor =
+            (sticker_thickness / f64::from(image.width)).min(max_height / f64::from(image.height));
 
-            let x_offset = index as f64 * (sticker_thickness + padding);
-            //Decrease the sticker size until they match the target thickness or maximum height
-            let scale_factor = (sticker_thickness / f64::from(image_width))
-                .min(max_height / f64::from(image_height));
+        //Sticker image itself
+        cairo.scale(scale_factor, scale_factor);
+        cairo.set_source_surface(&surface, x_offset * (1.0 / scale_factor), 0.0)?;
+        cairo.paint()?;
+        surface.finish();
 
-            //Sticker image itself
-            cairo.scale(scale_factor, scale_factor);
-            cairo.set_source_surface(&surface, x_offset * (1.0 / scale_factor), 0.0);
-            cairo.paint();
-            surface.finish();
-            libwebp_sys::WebPFree(image as *mut std::ffi::c_void);
+        //Bar graphs
+        let normalized_x_offset = x_offset + 0.5 * f64::from(image.height) * scale_factor; //Middle of sticker
+        cairo.scale(1.0 / scale_factor, 1.0 / scale_factor); //undo scaling
+        cairo.rectangle(
+            normalized_x_offset,
+            max_height + padding,
+            bar_thickness,
+            f64::from(*num as i32) * y_scale,
+        );
+        cairo.set_source_rgb(0.5, 0.5, 1.0);
+        cairo.fill()?;
 
-            //Bar graphs
-            let normalized_x_offset = x_offset + 0.5 * f64::from(image_width) * scale_factor; //Middle of sticker
-            cairo.scale(1.0 / scale_factor, 1.0 / scale_factor); //undo scaling
-            cairo.rectangle(
-                normalized_x_offset,
-                max_height + padding,
-                bar_thickness,
-                f64::from(*num as i32) * y_scale,
-            );
-            cairo.set_source_rgb(0.5, 0.5, 1.0);
-            cairo.fill();
+        //Usage text
+        let num_text = format!("{} uses", num);
+        cairo.select_font_face("Hack", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+        cairo.set_font_size(40.0);
 
-            //Usage text
-            let num_text = format!("{} uses", num);
-            cairo.select_font_face("Hack", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
-            cairo.set_font_size(40.0);
-
-            let extents = cairo.text_extents(&num_text);
-            cairo.move_to(
-                normalized_x_offset + extents.width / 2.0 - extents.x_bearing,
-                max_height + padding + (f64::from(*num as i32) * y_scale) + extents.height / 2.0
-                    - extents.y_bearing,
-            );
-            cairo.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-            cairo.show_text(&num_text);
-        }
+        let extents = cairo.text_extents(&num_text)?;
+        cairo.move_to(
+            normalized_x_offset + extents.width() / 2.0 - extents.x_bearing(),
+            max_height + padding + (f64::from(*num as i32) * y_scale) + extents.height() / 2.0
+                - extents.y_bearing(),
+        );
+        cairo.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+        cairo.show_text(&num_text)?;
     }
 
-    surface.write_to_png(&mut rendered_image).unwrap();
+    //FIXME: get rid of this expect?
+    surface
+        .write_to_png(&mut rendered_image)
+        .expect("failed to write rendersurface to PNG");
     Ok(rendered_image)
 }
 
